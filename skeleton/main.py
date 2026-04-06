@@ -9,8 +9,13 @@ hands = mp_hands.Hands()
 pose = mp_pose.Pose()
 
 cap = cv2.VideoCapture(0)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 prev_time = 0
 curr_time = 0
+
+prev_wrist_y = 0
+
 while True:
     ret, frame = cap.read()
     if not ret:
@@ -23,13 +28,31 @@ while True:
     if hand_result.multi_hand_landmarks:
         for hand in hand_result.multi_hand_landmarks:
             mp_draw.draw_landmarks(frame, hand, mp_hands.HAND_CONNECTIONS)
+    
     if pose_result.pose_landmarks:
             mp_draw.draw_landmarks(frame, pose_result.pose_landmarks, mp_pose.POSE_CONNECTIONS)
+            landmarks = pose_result.pose_landmarks.landmark
+            right_wrist = landmarks[mp_pose.PoseLandmark.LEFT_WRIST]
+
+            wrist_y = round(right_wrist.y, 3)
+
+            speed = wrist_y - prev_wrist_y
+            speed = round(speed, 3)
+            if speed > 0.05:
+                 print("STRUM!")
+                 cv2.putText(frame, "STRUM!", (500,80), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 255, 0), 3)
+            prev_wrist_y = wrist_y
+            print("Right Wrist Y:", wrist_y, "| Speed:", speed)
+
+            cv2.putText(frame, "Wrist Y:" + str(wrist_y), (10, 80), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 0), 2)   
+            cv2.putText(frame, "Speed:"  + str(speed), (10, 120), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 165, 255), 2)
     curr_time = time.time()
     fps = 1 / (curr_time - prev_time) if prev_time != 0 else 0
     prev_time = curr_time
     cv2.putText(frame, "FPS: " + str(int(fps)), (10, 40), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
+    
     cv2.imshow("InstrumentalCV", frame)
+
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
