@@ -19,6 +19,7 @@ COLOR_YELLOW = (0, 255, 255)
 COLOR_CYAN = (255, 255, 0)
 COLOR_ORANGE = (0, 165, 255)
 COLOR_WHITE = (255, 255, 255)
+COLOR_BLACK = (0, 0, 0)
 
 FINGER_COLORS = {
     "thumb": COLOR_YELLOW,
@@ -28,18 +29,11 @@ FINGER_COLORS = {
     "pinky": COLOR_MAGENTA
 }
 
-cap = cv2.VideoCapture(0)
+PIANO_HEIGHT_RATIO = 0.7
+PIANO_BOTTOM_MARGIN = 0.4
+PIANO_ALPHA = 0.6  
 
-cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-
-if not cap.isOpened():
-    print("Error:Webcam not found/Is in use of other application")
-    exit()
-
-PIANO_HEIGHT_RATIO = 0.30
-
-WHITE_KEY_COUNT = 21    # 7 white keys per octave, 2 total octaves
+WHITE_KEY_COUNT = 21    # 7 white keys per octave, 3 total octaves
 
 WHITE_NOTES = ['C', 'D', 'E', 'F', 'G', 'A', 'B']
 
@@ -47,14 +41,17 @@ BLACK_KEY_AFTER = {0, 1 , 3, 4, 5}
 
 BLACK_NOTES = {0: "C#", 1: "D#", 3: "F#", 4: "G#", 5: "A#"}  # skipped 2 no e sharp
 
+WHITE_KEY_HOVER_COLOR = (255,220,180) #light oranange
+BLACK_KEY_HOVER_COLOR = (120,80,200) # purple 
+
 def generate_piano_keys(frame_w, frame_h): # generates piano keys and returns there coordinates and corresponding notes
     white_keys = []
     black_keys = []
     
-    white_key_w = frame_w // WHITE_KEY_COUNT
+    white_key_w = frame_w / WHITE_KEY_COUNT
 
     piano_top = int(frame_h * (1 - PIANO_HEIGHT_RATIO))
-    piano_bottom = frame_h
+    piano_bottom = int(frame_h * (1 - PIANO_BOTTOM_MARGIN))
 
     black_key_h = int((piano_bottom - piano_top) * 0.60)
     black_key_w = int(white_key_w * 0.6)
@@ -64,12 +61,12 @@ def generate_piano_keys(frame_w, frame_h): # generates piano keys and returns th
         note_idx = i % 7
         note_name = f"{WHITE_NOTES[note_idx]}{octave}"
 
-        x1 = i * white_key_w # left edge of white key
-        x2 = (i + 1 ) * white_key_w # right edge of white key
+        x1 = int(i * white_key_w) # left edge of white key
+        x2 = int((i + 1 ) * white_key_w) # right edge of white key
         y1 = piano_top
         y2 = piano_bottom
 
-        white_keys.append({"note": note_name, "x1": x1, "y1": y1, "x2": x2, "y2": y2, "is_black": False, "color": COLOR_WHITE, "active_color": (180,230,255)})
+        white_keys.append({"note": note_name, "x1": x1, "y1": y1, "x2": x2, "y2": y2, "is_black": False, "color_default": COLOR_WHITE, "color_hover": WHITE_KEY_HOVER_COLOR, "color": COLOR_WHITE})
 
     for i in range(WHITE_KEY_COUNT):
         octave = 3 + (i // 7)
@@ -77,25 +74,24 @@ def generate_piano_keys(frame_w, frame_h): # generates piano keys and returns th
         if note_idx in BLACK_KEY_AFTER:
             note_name = f"{BLACK_NOTES[note_idx]}{octave}"
 
-            center_x = (i + 1) * white_key_w     # center between 2 keys
+            center_x = int((i + 1) * white_key_w)     # center between 2 keys
 
             x1 = center_x - (black_key_w // 2)
             x2 = center_x + (black_key_w // 2)
             y1 = piano_top
             y2 = piano_top + black_key_h
 
-            black_keys.append({"note": note_name, "x1": x1, "y1": y1, "x2": x2, "y2": y2, "is_black": True, "color": (40,40,40), "active_color": (100,80,200)})
+            black_keys.append({"note": note_name, "x1": x1, "y1": y1, "x2": x2, "y2": y2, "is_black": True, "color_default": COLOR_BLACK, "color_hover": BLACK_KEY_HOVER_COLOR, "color": COLOR_BLACK})
 
     return white_keys, black_keys
-PIANO_ALPHA = 0.6   
-def draw_piano(frame, white_keys, black_keys):
-    """
-    Draw semi-transparent piano keys on the frame.
-    Uses alpha blending so your hands are visible through the keys.
-    """
+
+
+
+def draw_piano(frame, white_keys, black_keys): # draws semi transparent piano keys, so hands are visible
+    
     # Create a copy to draw solid keys on
     overlay = frame.copy()
-    # === PASS 1: WHITE KEYS (background layer) ===
+
     for key in white_keys:
         # Filled white rectangle
         cv2.rectangle(overlay, (key["x1"], key["y1"]), (key["x2"], key["y2"]),
@@ -103,7 +99,7 @@ def draw_piano(frame, white_keys, black_keys):
         # Border
         cv2.rectangle(overlay, (key["x1"], key["y1"]), (key["x2"], key["y2"]),
                       (180, 180, 180), 1)
-    # === PASS 2: BLACK KEYS (foreground, drawn on top) ===
+
     for key in black_keys:
         # Filled dark rectangle
         cv2.rectangle(overlay, (key["x1"], key["y1"]), (key["x2"], key["y2"]),
@@ -111,19 +107,19 @@ def draw_piano(frame, white_keys, black_keys):
         # Subtle highlight line at top for 3D effect
         cv2.line(overlay, (key["x1"] + 2, key["y1"] + 2),
                  (key["x2"] - 2, key["y1"] + 2), (80, 80, 80), 1)
-    # === BLEND: Make piano semi-transparent ===
-    # Only blend the piano region (not the whole frame — saves CPU)
+        
+    # Only blend the piano region (not the whole frame, saves resources)
     piano_top = white_keys[0]["y1"]
     blended_region = cv2.addWeighted(
         overlay[piano_top:, :],     # Piano area from overlay (has keys drawn)
         PIANO_ALPHA,                # 0.6 = 60% the piano
-        frame[piano_top:, :],       # Same area from original (has your hands)
+        frame[piano_top:, :],       
         1 - PIANO_ALPHA,            # 0.4 = 40% your hands showing through
         0                           # No brightness offset
     )
     # Write blended result back into the frame
     frame[piano_top:, :] = blended_region
-    # === DRAW NOTE LABELS (after blending, so text stays fully opaque) ===
+    # draws NOTE LABELS (after blending, so text stays fully opaque)
     for key in white_keys:
         note_text = key["note"]
         text_size = cv2.getTextSize(note_text, cv2.FONT_HERSHEY_SIMPLEX, 0.4, 1)[0]
@@ -142,6 +138,29 @@ def draw_piano(frame, white_keys, black_keys):
     if white_keys:
         cv2.line(frame, (0, piano_top), (frame.shape[1], piano_top), (0, 200, 255), 2) # top edge of piano with orange color
 
+
+def detect_finger_on_key(finger_x, finger_y, all_keys): # checks if finger is inside a key, using the coordiantes of the finger, if they lie between the right and left edge of the key
+    for key in all_keys:
+        if key["x1"] <= finger_x <= key["x2"] and key["y1"] <= finger_y <= key["y2"]:
+            return key
+    return None
+
+def reset_key_colors(white_keys, black_keys): # resets the keys color after the finger leaves the specified area
+    for key in white_keys:
+        key["color"] = key["color_default"]
+    for key in black_keys:
+        key["color"] = key["color_default"]
+
+cap = cv2.VideoCapture(0)
+
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+
+if not cap.isOpened():
+    print("Error:Webcam not found/Is in use of other application")
+    exit()
+
+# Generate keys
 ret, temp_frame = cap.read()
 if ret:
     temp_frame = cv2.flip(temp_frame, 1)
@@ -151,10 +170,11 @@ else:
     print("Error: Unable to read from frame")
     exit()
 
-all_keys = white_keys + black_keys
-
+all_keys = black_keys + white_keys # black keys are checked first in hover detection, so they take priority over white keys when hovering in the overlapping area
 
 prev_time = 0
+
+hovered_notes = []
 
 while True:
     ret, frame = cap.read()
@@ -162,13 +182,14 @@ while True:
         print("Error: Webcam not found/Is in use of other application")
         break
 
-    
-    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     frame = cv2.flip(frame, 1)
     frame_h, frame_w, _ = frame.shape
 
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     result = hands.process(rgb_frame)
+
+    reset_key_colors(white_keys, black_keys)
+    hovered_notes = []
 
     if result.multi_hand_landmarks:
         for hand_idx, hand_landmarks in enumerate(result.multi_hand_landmarks):
@@ -185,6 +206,15 @@ while True:
                 cv2.circle(frame, (tip_x, tip_y), 10, color, -1)  #draw circles on fingertips
                 cv2.circle(frame, (tip_x, tip_y), 12, COLOR_WHITE, 1) #white outline
 
+                hovered_key = detect_finger_on_key(tip_x, tip_y, all_keys)
+                if hovered_key is not None:
+                    hovered_key["color"] = hovered_key["color_hover"]
+                    hovered_notes.append(hovered_key["note"])
+
+                    key_center_x = (hovered_key["x1"] + hovered_key["x2"]) // 2
+                    key_top_y = hovered_key["y1"]
+                    cv2.line(frame,(tip_x, tip_y), ( key_center_x, key_top_y), color, 1, cv2.LINE_AA) # line from tip to key
+
                 z_value = round(tip.z, 3)
                 cv2.putText(frame, f"{finger_name[0].upper()}: z={z_value}", (tip_x + 15, tip_y - 10)
                             , cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1) #display z value of each fingertip
@@ -200,18 +230,25 @@ while True:
     prev_time = curr_time
 
     cv2.putText(frame, f"FPS: {int(fps)}", (10, 35), cv2.FONT_HERSHEY_SIMPLEX, 1, COLOR_GREEN if fps > 20 else COLOR_RED, 2)   
-    cv2.putText(frame, "Show your hands to the camera!", (10, frame_h -20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, COLOR_WHITE, 1)
-    cv2.putText(frame, "Press 'q' to quit", (frame_w - 200, frame_h - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (150,150,150), 1)
-    cv2.imshow("InstrumentaLCV Piano", frame)
-
+    # displays which note is being hovered
+    if hovered_notes:
+        notes_text = "Hovering: " + ", ".join(hovered_notes)
+        cv2.putText(frame, notes_text, (10, 65),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 200, 255), 2)
+    else:
+        cv2.putText(frame, "Move fingers over the keys!", (10, 65),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 200, 200), 1)
+    #label
+    cv2.putText(frame, "AIR PIANO MODE", (frame_w - 250, 35),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
+    cv2.imshow("InstrumentalCV Piano", frame)
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
 
 cap.release()
 cv2.destroyAllWindows()
 hands.close()
-
-print("Piano closed")
+print("Piano closed. 🎹")
 
 
            
