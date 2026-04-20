@@ -28,7 +28,7 @@ FINGER_COLORS = {
     "pinky": COLOR_MAGENTA
 }
 
-cap = cv2.VideoCapture(1)
+cap = cv2.VideoCapture(0)
 
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
@@ -36,6 +36,123 @@ cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 if not cap.isOpened():
     print("Error:Webcam not found/Is in use of other application")
     exit()
+
+PIANO_HEIGHT_RATIO = 0.30
+
+WHITE_KEY_COUNT = 21    # 7 white keys per octave, 2 total octaves
+
+WHITE_NOTES = ['C', 'D', 'E', 'F', 'G', 'A', 'B']
+
+BLACK_KEY_AFTER = {0, 1 , 3, 4, 5}
+
+BLACK_NOTES = {0: "C#", 1: "D#", 3: "F#", 4: "G#", 5: "A#"}  # skipped 2 no e sharp
+
+def generate_piano_keys(frame_w, frame_h): # generates piano keys and returns there coordinates and corresponding notes
+    white_keys = []
+    black_keys = []
+    
+    white_key_w = frame_w // WHITE_KEY_COUNT
+
+    piano_top = int(frame_h * (1 - PIANO_HEIGHT_RATIO))
+    piano_bottom = frame_h
+
+    black_key_h = int((piano_bottom - piano_top) * 0.60)
+    black_key_w = int(white_key_w * 0.6)
+
+    for i in range(WHITE_KEY_COUNT):
+        octave = 3 + (i // 7) # first 7 keys octave 4, next 7 octave 5
+        note_idx = i % 7
+        note_name = f"{WHITE_NOTES[note_idx]}{octave}"
+
+        x1 = i * white_key_w # left edge of white key
+        x2 = (i + 1 ) * white_key_w # right edge of white key
+        y1 = piano_top
+        y2 = piano_bottom
+
+        white_keys.append({"note": note_name, "x1": x1, "y1": y1, "x2": x2, "y2": y2, "is_black": False, "color": COLOR_WHITE, "active_color": (180,230,255)})
+
+    for i in range(WHITE_KEY_COUNT):
+        octave = 3 + (i // 7)
+        note_idx = i % 7
+        if note_idx in BLACK_KEY_AFTER:
+            note_name = f"{BLACK_NOTES[note_idx]}{octave}"
+
+            center_x = (i + 1) * white_key_w     # center between 2 keys
+
+            x1 = center_x - (black_key_w // 2)
+            x2 = center_x + (black_key_w // 2)
+            y1 = piano_top
+            y2 = piano_top + black_key_h
+
+            black_keys.append({"note": note_name, "x1": x1, "y1": y1, "x2": x2, "y2": y2, "is_black": True, "color": (40,40,40), "active_color": (100,80,200)})
+
+    return white_keys, black_keys
+PIANO_ALPHA = 0.6   
+def draw_piano(frame, white_keys, black_keys):
+    """
+    Draw semi-transparent piano keys on the frame.
+    Uses alpha blending so your hands are visible through the keys.
+    """
+    # Create a copy to draw solid keys on
+    overlay = frame.copy()
+    # === PASS 1: WHITE KEYS (background layer) ===
+    for key in white_keys:
+        # Filled white rectangle
+        cv2.rectangle(overlay, (key["x1"], key["y1"]), (key["x2"], key["y2"]),
+                      key["color"], -1)
+        # Border
+        cv2.rectangle(overlay, (key["x1"], key["y1"]), (key["x2"], key["y2"]),
+                      (180, 180, 180), 1)
+    # === PASS 2: BLACK KEYS (foreground, drawn on top) ===
+    for key in black_keys:
+        # Filled dark rectangle
+        cv2.rectangle(overlay, (key["x1"], key["y1"]), (key["x2"], key["y2"]),
+                      key["color"], -1)
+        # Subtle highlight line at top for 3D effect
+        cv2.line(overlay, (key["x1"] + 2, key["y1"] + 2),
+                 (key["x2"] - 2, key["y1"] + 2), (80, 80, 80), 1)
+    # === BLEND: Make piano semi-transparent ===
+    # Only blend the piano region (not the whole frame — saves CPU)
+    piano_top = white_keys[0]["y1"]
+    blended_region = cv2.addWeighted(
+        overlay[piano_top:, :],     # Piano area from overlay (has keys drawn)
+        PIANO_ALPHA,                # 0.6 = 60% the piano
+        frame[piano_top:, :],       # Same area from original (has your hands)
+        1 - PIANO_ALPHA,            # 0.4 = 40% your hands showing through
+        0                           # No brightness offset
+    )
+    # Write blended result back into the frame
+    frame[piano_top:, :] = blended_region
+    # === DRAW NOTE LABELS (after blending, so text stays fully opaque) ===
+    for key in white_keys:
+        note_text = key["note"]
+        text_size = cv2.getTextSize(note_text, cv2.FONT_HERSHEY_SIMPLEX, 0.4, 1)[0]
+        text_x = key["x1"] + (key["x2"] - key["x1"] - text_size[0]) // 2
+        text_y = key["y2"] - 10
+        cv2.putText(frame, note_text, (text_x, text_y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.4, (80, 80, 80), 1)
+    for key in black_keys:
+        note_text = key["note"]
+        text_size = cv2.getTextSize(note_text, cv2.FONT_HERSHEY_SIMPLEX, 0.3, 1)[0]
+        text_x = key["x1"] + (key["x2"] - key["x1"] - text_size[0]) // 2
+        text_y = key["y2"] - 8
+        cv2.putText(frame, note_text, (text_x, text_y),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.3, (200, 200, 200), 1)
+    
+    if white_keys:
+        cv2.line(frame, (0, piano_top), (frame.shape[1], piano_top), (0, 200, 255), 2) # top edge of piano with orange color
+
+ret, temp_frame = cap.read()
+if ret:
+    temp_frame = cv2.flip(temp_frame, 1)
+    h, w, _ = temp_frame.shape
+    white_keys, black_keys = generate_piano_keys(w, h)
+else: 
+    print("Error: Unable to read from frame")
+    exit()
+
+all_keys = white_keys + black_keys
+
 
 prev_time = 0
 
@@ -47,7 +164,7 @@ while True:
 
     
     rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
+    frame = cv2.flip(frame, 1)
     frame_h, frame_w, _ = frame.shape
 
     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
@@ -56,7 +173,7 @@ while True:
     if result.multi_hand_landmarks:
         for hand_idx, hand_landmarks in enumerate(result.multi_hand_landmarks):
 
-            mp_draw.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS, mp_draw.DrawingSpec(color=(0,0,0), thickness=2, circle_radius=2), mp_draw.DrawingSpec(color=(200,200,200), thickness=1, circle_radius=1))
+            mp_draw.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS, mp_draw.DrawingSpec(color=(0,0,0), thickness=2, circle_radius=2), mp_draw.DrawingSpec(color=(150,150,150), thickness=1, circle_radius=1))
 
             for finger_name, tip_id in fingertip_ids.items():
                 tip = hand_landmarks.landmark[tip_id]
@@ -73,14 +190,11 @@ while True:
                             , cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1) #display z value of each fingertip
                 if result.multi_handedness:
                     hand_label = result.multi_handedness[hand_idx].classification[0].label
-                    if hand_label == "Left":
-                        hand_label = "Right"
-                    elif hand_label == "Right":
-                        hand_label = "Left"
                     wrist = hand_landmarks.landmark[0]
                     wrist_x, wrist_y = int(wrist.x * frame_w), int(wrist.y * frame_h)
                     cv2.putText(frame, hand_label, (wrist_x - 30, wrist_y + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, COLOR_CYAN, 2) #display left/right hand label near wrist
 
+    draw_piano(frame, white_keys, black_keys)
     curr_time = time.time()
     fps = 1 / (curr_time - prev_time) if prev_time != 0 else 0
     prev_time = curr_time
