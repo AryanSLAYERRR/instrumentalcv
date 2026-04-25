@@ -1,6 +1,8 @@
 import cv2
 import mediapipe as mp
 import time
+import pygame
+import os
 
 mp_hands = mp.solutions.hands
 mp_draw = mp.solutions.drawing_utils
@@ -9,7 +11,7 @@ hands = mp_hands.Hands(static_image_mode=False, max_num_hands=2, min_detection_c
 
 fingertip_ids = {"thumb": 4, "index": 8, "middle": 12, "ring": 16, "pinky": 20}
 
-pip_ids = {"thumb": 2, "index": 6, "middle": 10, "ring": 14, "pinky": 18}
+
 
 COLOR_GREEN = (0, 255, 0)
 COLOR_RED = (0, 0, 255)
@@ -31,17 +33,26 @@ FINGER_COLORS = {
 
 PIANO_HEIGHT_RATIO = 0.7
 PIANO_BOTTOM_MARGIN = 0.4
-PIANO_ALPHA = 0.6  
-SMOOTHING_ALPHA = 0.4
+PIANO_ALPHA = 0.6
 
-PRESS_VELOCITY_THRESHOLD = 0.01
-PRESS_COOLDOWN_SECONDS =0.3
 
-STATE_IDLE = "idle"
-STATE_PRESSED = "pressed"
-STATE_COOLDOWN = "cooldown"
+HOVER_COOLDOWN_SECONDS = 0.15   # Minimum time between triggers on the SAME key
+                                 # 0.15 = can play ~6 notes/sec max (plenty fast)
+                                 # Lower = faster playing but more accidental retriggers
+                                 # Higher = cleaner but feels sluggish
 
-WHITE_KEY_COUNT = 21    # 7 white keys per octave, 3 total octaves
+
+NOTE_TO_MIDI = {}
+
+CHROMATIC_NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+
+for octave in range(0,9):
+    for i,note in enumerate(CHROMATIC_NOTES):
+        midi_num = (octave + 1) * 12 + i
+        note_name = f"{note}{octave}"
+        NOTE_TO_MIDI[note_name] = midi_num
+
+WHITE_KEY_COUNT = 14    # 7 white keys per octave, 2 total octaves
 
 WHITE_NOTES = ['C', 'D', 'E', 'F', 'G', 'A', 'B']
 
@@ -52,54 +63,49 @@ BLACK_NOTES = {0: "C#", 1: "D#", 3: "F#", 4: "G#", 5: "A#"}  # skipped 2 no e sh
 WHITE_KEY_HOVER_COLOR = (255,220,180) #light oranange
 BLACK_KEY_HOVER_COLOR = (120,80,200) # purple 
 
-class FingerTracker: # tracks the z depth of a single finger for press detection
+class HoverTracker: # Tracks which key a finger is hovering over, frame by frame
+    # Reports: note_on (entered new key), is_held (same key), note_off (left key)
+
     def __init__(self, finger_name):
         self.finger_name = finger_name
+        self.prev_key_note = None
+        self.current_key_note = None
 
-        #z tracking
-        self.smoothed_z = 0.0 #smoothed ema value of z depth
-        self.prev_smoothed_z = 0.0 # prev frame smoothed z vlaue
-        self.z_velocity = 0.0 # how fast is z changing
-        self.initialized = False # flag to check if we have an initial z value yet
+        # Event flags (reset each frame)
+        self.note_on = False
+        self.is_held = False
+        self.note_off = False
+        self.released_note = None
 
-        self.state = STATE_IDLE
-        self.last_pressed_time = 0.0
-
-        self.current_key = None # which key is being pressed (if any)
-
-    def update(self, raw_z, current_time): #calcs new z values and updates them
-        if not self.initialized:
-            self.smoothed_z = raw_z
-            self.prev_smoothed_z = raw_z
-            self.initialized = True
-            return False
-        #EMA smoothing for more stable z values, with a higher weight on the current value for more responsiveness
-        self.prev_smoothed_z = self.smoothed_z
-        self.smoothed_z = (SMOOTHING_ALPHA * raw_z) + ((1 - SMOOTHING_ALPHA) * self.smoothed_z)
-
-        #calc z velocity
-
-        self.z_velocity = self.smoothed_z - self.prev_smoothed_z
-
-        press_detected = False
-
-        if self.state == STATE_IDLE:
-            if self.z_velocity < -PRESS_VELOCITY_THRESHOLD: # finger moving down fast, potential press
-                self.state = STATE_PRESSED
-                self.last_press_time = current_time
-                press_detected = True
-        elif self.state == STATE_PRESSED:
-            self.state = STATE_COOLDOWN
-        elif self.state == STATE_COOLDOWN:
-            elapsed = current_time - self.last_press_time
-            if elapsed > PRESS_COOLDOWN_SECONDS:
-                self.state = STATE_IDLE
-        return press_detected
+        self.last_trigger_time = 0.0
     
-    def reset(self):
-        self.initialized = False
-        self.state = STATE_IDLE
-        self.current_key = None
+    def update(self, current_key, current_time):
+        # Reset event flags from last frame
+        self.note_on = False
+        self.is_held = False
+        self.note_off = False
+        self.released_note = None
+
+        self.current_key_note = current_key["note"] if current_key else None
+
+        # Same key as last frame (or still no key)?
+        if self.current_key_note == self.prev_key_note:
+            if self.current_key_note is not None:
+                self.is_held = True     # Finger still on same key = sustain
+        else:
+            # Key changed — check for note_off and note_on
+            if self.prev_key_note is not None:
+                self.note_off = True
+                self.released_note = self.prev_key_note
+
+            if self.current_key_note is not None:
+                elapsed = current_time - self.last_trigger_time
+                if elapsed >= HOVER_COOLDOWN_SECONDS:
+                    self.note_on = True
+                    self.last_trigger_time = current_time
+
+        # Remember for next frame
+        self.prev_key_note = self.current_key_note
 
 def generate_piano_keys(frame_w, frame_h): # generates piano keys and returns there coordinates and corresponding notes
     white_keys = []
@@ -142,8 +148,6 @@ def generate_piano_keys(frame_w, frame_h): # generates piano keys and returns th
 
     return white_keys, black_keys
 
-
-
 def draw_piano(frame, white_keys, black_keys): # draws semi transparent piano keys, so hands are visible
     
     # Create a copy to draw solid keys on
@@ -171,7 +175,7 @@ def draw_piano(frame, white_keys, black_keys): # draws semi transparent piano ke
         overlay[piano_top:, :],     # Piano area from overlay (has keys drawn)
         PIANO_ALPHA,                # 0.6 = 60% the piano
         frame[piano_top:, :],       
-        1 - PIANO_ALPHA,            # 0.4 = 40% your hands showing through
+        1 - PIANO_ALPHA,            # 0.4 = 40% hands showing through
         0                           # No brightness offset
     )
     # Write blended result back into the frame
@@ -195,12 +199,64 @@ def draw_piano(frame, white_keys, black_keys): # draws semi transparent piano ke
     if white_keys:
         cv2.line(frame, (0, piano_top), (frame.shape[1], piano_top), (0, 200, 255), 2) # top edge of piano with orange color
 
-
 def detect_finger_on_key(finger_x, finger_y, all_keys): # checks if finger is inside a key, using the coordiantes of the finger, if they lie between the right and left edge of the key
     for key in all_keys:
         if key["x1"] <= finger_x <= key["x2"] and key["y1"] <= finger_y <= key["y2"]:
             return key
     return None
+
+class SoundEngine:
+    """
+    Plays real Salamander Grand Piano WAV samples via pygame.mixer.
+    No MIDI devices needed - just loads WAV files and plays them.
+    Supports polyphony (multiple notes at once) via pygame channels.
+    """
+    def __init__(self):
+        pygame.mixer.pre_init(frequency=44100, size=-16, channels=2, buffer=512)
+        pygame.mixer.init()
+        pygame.mixer.set_num_channels(20)
+        
+        self.sounds = {}
+        self.channels = {}
+        
+        sounds_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sounds")
+        
+        if not os.path.exists(sounds_dir):
+            print("ERROR: No sounds directory! Run 'python setup_sounds.py' first.")
+            return
+        
+        print("Loading piano samples...")
+        loaded = 0
+        for filename in os.listdir(sounds_dir):
+            if filename.endswith('.wav'):
+                note_name = filename.replace('.wav', '')
+                filepath = os.path.join(sounds_dir, filename)
+                try:
+                    self.sounds[note_name] = pygame.mixer.Sound(filepath)
+                    loaded += 1
+                except Exception as e:
+                    print(f"  Failed to load {filename}: {e}")
+        
+        print(f"Loaded {loaded} piano samples (Salamander Grand Piano V3)")
+    
+    def note_on(self, note_name, velocity=100):
+        if note_name not in self.sounds:
+            return
+        channel = pygame.mixer.find_channel()
+        if channel:
+            self.sounds[note_name].set_volume(velocity / 127.0)
+            channel.play(self.sounds[note_name])
+            self.channels[note_name] = channel
+    
+    def note_off(self, note_name, fadeout_ms=300):
+        if note_name in self.channels:
+            channel = self.channels[note_name]
+            if channel and channel.get_busy():
+                channel.fadeout(fadeout_ms)
+            del self.channels[note_name]
+    
+    def cleanup(self):
+        pygame.mixer.quit()
 
 def reset_key_colors(white_keys, black_keys): # resets the keys color after the finger leaves the specified area
     for key in white_keys:
@@ -208,7 +264,7 @@ def reset_key_colors(white_keys, black_keys): # resets the keys color after the 
     for key in black_keys:
         key["color"] = key["color_default"]
 
-cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture(1)
 
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
@@ -216,12 +272,14 @@ cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 if not cap.isOpened():
     print("Error:Webcam not found/Is in use of other application")
     exit()
+
+
 finger_trackers = {}
 
-def get_tracker(hand_label, finger_name): # creates tracker for each finger of each hand, so we can track their z values independently for press detection
+def get_tracker(hand_label, finger_name): # creates hover tracker for each finger of each hand
     key = f"{hand_label}_{finger_name}"
     if key not in finger_trackers:
-        finger_trackers[key] = FingerTracker(finger_name)
+        finger_trackers[key] = HoverTracker(finger_name)
     return finger_trackers[key]
 
 # Generate keys
@@ -240,6 +298,7 @@ prev_time = 0
 
 hovered_notes = []
 
+sound_engine = SoundEngine()
 while True:
     ret, frame = cap.read()
     if not ret:
@@ -265,59 +324,56 @@ while True:
 
             for finger_name, tip_id in fingertip_ids.items():
                 tip = hand_landmarks.landmark[tip_id]
-                pip = hand_landmarks.landmark[pip_ids[finger_name]]
+                tip_x, tip_y = int(tip.x * frame_w), int(tip.y * frame_h)
 
-                tip_x, tip_y = int(tip.x * frame_w), int(tip.y * frame_h) #location of each landmark
-
-                relative_z = tip.z - pip.z
-                tracker = get_tracker(hand_label, finger_name)
-                current_time = time.time()
-                press_detected = tracker.update(relative_z, current_time)
-
-
-                color = FINGER_COLORS[finger_name]
-                
-               
-
+                # Which key is this finger over?
                 hovered_key = detect_finger_on_key(tip_x, tip_y, all_keys)
-                tracker.current_key = hovered_key
-                if tracker.state == STATE_COOLDOWN:
-                    dot_color = COLOR_RED
-                elif tracker.state == STATE_PRESSED:
-                    dot_color = COLOR_YELLOW
+
+                # Update the hover tracker
+                tracker = get_tracker(hand_label, finger_name)
+                tracker.update(hovered_key, time.time())
+
+                # Fingertip color: green when active, normal when idle
+                if tracker.note_on or tracker.is_held:
+                    dot_color = COLOR_GREEN
                 else:
                     dot_color = FINGER_COLORS[finger_name]
-                
-                cv2.circle(frame, (tip_x, tip_y), 10, color, -1)  #draw circles on fingertips
-                cv2.circle(frame, (tip_x, tip_y), 12, COLOR_WHITE, 1) #white outline
 
+                cv2.circle(frame, (tip_x, tip_y), 10, dot_color, -1)
+                cv2.circle(frame, (tip_x, tip_y), 12, COLOR_WHITE, 1)
+
+                # Key visual feedback
                 if hovered_key is not None:
-                    hovered_key["color"] = hovered_key["color_hover"]
-                    hovered_notes.append(hovered_key["note"])
+                    if tracker.is_held or tracker.note_on:
+                        hovered_key["color"] = COLOR_GREEN              # Pressed/held
+                    else:
+                        hovered_key["color"] = hovered_key["color_hover"]
 
+                    hovered_notes.append(hovered_key["note"])
                     key_center_x = (hovered_key["x1"] + hovered_key["x2"]) // 2
-                    key_top_y = hovered_key["y1"]
-                    cv2.line(frame,(tip_x, tip_y), ( key_center_x, hovered_key["y1"]), dot_color, 1, cv2.LINE_AA) # line from tip to key
-                
-                if press_detected and hovered_key is not None:
+                    cv2.line(frame, (tip_x, tip_y), (key_center_x, hovered_key["y1"]),
+                             dot_color, 1, cv2.LINE_AA)
+
+                # NOTE ON finger just entered a new key
+                if tracker.note_on:
                     note = hovered_key["note"]
-                    print(f"Pressed: {note} (by {hand_label} {finger_name})")
-                    hovered_key["color"] = COLOR_GREEN # flash green for white keys, blue for black keys on press
-                    # press burst effect
+                    print(f"🎹 NOTE ON:  {note} ({hand_label} {finger_name})")
+                    sound_engine.note_on(note)
                     key_cx = (hovered_key["x1"] + hovered_key["x2"]) // 2
                     key_cy = (hovered_key["y1"] + hovered_key["y2"]) // 2
-                    cv2.circle(frame, (key_cx, key_cy), 20, COLOR_GREEN, 2) # circle the key on press
-                    cv2.circle(frame, (key_cx, key_cy), 30, COLOR_GREEN, 1) # white outline
-                
-                vel_text = f"v:{tracker.z_velocity:.3f}"
-                vel_color = COLOR_RED if tracker.z_velocity < -PRESS_VELOCITY_THRESHOLD else (150, 150, 150)
-                cv2.putText(frame, vel_text, (tip_x + 15, tip_y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.35, vel_color, 1) #display z velocity near fingertip
-                z_value = round(tip.z, 3)
-                cv2.putText(frame, f"{finger_name[0].upper()}: z={z_value}", (tip_x + 15, tip_y - 10)
-                            , cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1) #display z value of each fingertip
+                    cv2.circle(frame, (key_cx, key_cy), 20, COLOR_GREEN, 2)
+                    cv2.circle(frame, (key_cx, key_cy), 30, COLOR_GREEN, 1)
+
+                # NOTE OFF finger just left a key
+                if tracker.note_off:
+                    print(f"   NOTE OFF: {tracker.released_note} ({hand_label} {finger_name})")
+                    sound_engine.note_off(tracker.released_note)
+
+            # Hand label near wrist
             wrist = hand_landmarks.landmark[0]
             wrist_x, wrist_y = int(wrist.x * frame_w), int(wrist.y * frame_h)
-            cv2.putText(frame, hand_label, (wrist_x - 30, wrist_y + 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, COLOR_CYAN, 2)
+            cv2.putText(frame, hand_label, (wrist_x - 30, wrist_y + 30),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, COLOR_CYAN, 2)
                 
                     
 
@@ -345,6 +401,7 @@ while True:
 cap.release()
 cv2.destroyAllWindows()
 hands.close()
+sound_engine.cleanup()
 print("Piano closed. 🎹")
 
 
