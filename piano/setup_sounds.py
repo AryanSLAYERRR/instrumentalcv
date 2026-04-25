@@ -128,6 +128,21 @@ def main():
                     shifted = pitch_shift(audio, sr, semitone_shift)
                 
                 # save as WAV
+                fade_in_samples = int(0.005 * sr)  # 5ms — very short, won't affect attack
+                if len(shifted.shape) > 1:
+                    for ch in range(shifted.shape[1]):
+                        shifted[:fade_in_samples, ch] *= np.linspace(0, 1, fade_in_samples)
+                else:
+                    shifted[:fade_in_samples] *= np.linspace(0, 1, fade_in_samples)
+                
+                # Fade-out (50ms) at end to prevent crackle on sample end
+                fade_out_samples = int(0.05 * sr)
+                if len(shifted.shape) > 1:
+                    for ch in range(shifted.shape[1]):
+                        shifted[-fade_out_samples:, ch] *= np.linspace(1, 0, fade_out_samples)
+                else:
+                    shifted[-fade_out_samples:] *= np.linspace(1, 0, fade_out_samples)
+                
                 sf.write(out_path, shifted, sr)
                 
                 shift_str = f"+{semitone_shift}" if semitone_shift >= 0 else str(semitone_shift)

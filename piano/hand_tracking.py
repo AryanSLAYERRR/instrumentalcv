@@ -3,6 +3,7 @@ import mediapipe as mp
 import time
 import pygame
 import os
+from collections import deque
 
 mp_hands = mp.solutions.hands
 mp_draw = mp.solutions.drawing_utils
@@ -10,8 +11,13 @@ mp_draw = mp.solutions.drawing_utils
 hands = mp_hands.Hands(static_image_mode=False, max_num_hands=2, min_detection_confidence=0.5)
 
 fingertip_ids = {"thumb": 4, "index": 8, "middle": 12, "ring": 16, "pinky": 20}
-
-
+FINGER_JOINTS = {
+    "thumb":  {"tip": 4,  "pip": 2},
+    "index":  {"tip": 8,  "pip": 6},
+    "middle": {"tip": 12, "pip": 10},
+    "ring":   {"tip": 16, "pip": 14},
+    "pinky":  {"tip": 20, "pip": 18},
+}
 
 COLOR_GREEN = (0, 255, 0)
 COLOR_RED = (0, 0, 255)
@@ -62,6 +68,20 @@ BLACK_NOTES = {0: "C#", 1: "D#", 3: "F#", 4: "G#", 5: "A#"}  # skipped 2 no e sh
 
 WHITE_KEY_HOVER_COLOR = (255,220,180) #light oranange
 BLACK_KEY_HOVER_COLOR = (120,80,200) # purple 
+class PositionSmoother:
+    def __init__(self, window=3):
+        self.window = window
+        self.history = {}
+    
+    def smooth(self, finger_key, x, y):
+        if finger_key not in self.history:
+            self.history[finger_key] = deque(maxlen=self.window)
+        self.history[finger_key].append((x, y))
+
+        pts = self.history[finger_key]
+        avg_x = int(sum(p[0] for p in pts) / len(pts))
+        avg_y = int(sum(p[1] for p in pts) / len(pts))
+        return avg_x, avg_y
 
 class HoverTracker: # Tracks which key a finger is hovering over, frame by frame
     # Reports: note_on (entered new key), is_held (same key), note_off (left key)
@@ -107,6 +127,17 @@ class HoverTracker: # Tracks which key a finger is hovering over, frame by frame
         # Remember for next frame
         self.prev_key_note = self.current_key_note
 
+def is_finger_extended(hand_landmarks, finger_name): # checks if the finger is extended by comparing the distance between the tip and pip joints, if the tip is above the pip, then the finger is considered extended
+    joints = FINGER_JOINTS[finger_name]
+    tip = hand_landmarks.landmark[joints["tip"]]
+    pip = hand_landmarks.landmark[joints["pip"]]
+
+    if finger_name == "thumb":
+        wrist = hand_landmarks.landmark[0]
+        return abs(tip.x - wrist.x) > abs(pip.x - wrist.x)
+    else:
+        return tip.y < pip.y  # in mediapipe, y=0 is top of image, so above means smaller y value
+    
 def generate_piano_keys(frame_w, frame_h): # generates piano keys and returns there coordinates and corresponding notes
     white_keys = []
     black_keys = []
@@ -199,20 +230,16 @@ def draw_piano(frame, white_keys, black_keys): # draws semi transparent piano ke
     if white_keys:
         cv2.line(frame, (0, piano_top), (frame.shape[1], piano_top), (0, 200, 255), 2) # top edge of piano with orange color
 
+DEAD_ZONE_PX = 3
 def detect_finger_on_key(finger_x, finger_y, all_keys): # checks if finger is inside a key, using the coordiantes of the finger, if they lie between the right and left edge of the key
     for key in all_keys:
-        if key["x1"] <= finger_x <= key["x2"] and key["y1"] <= finger_y <= key["y2"]:
+        if (key["x1"] + DEAD_ZONE_PX) <= finger_x <= (key["x2"] - DEAD_ZONE_PX) and key["y1"] <= finger_y <= key["y2"]:
             return key
     return None
 
 class SoundEngine:
-    """
-    Plays real Salamander Grand Piano WAV samples via pygame.mixer.
-    No MIDI devices needed - just loads WAV files and plays them.
-    Supports polyphony (multiple notes at once) via pygame channels.
-    """
     def __init__(self):
-        pygame.mixer.pre_init(frequency=44100, size=-16, channels=2, buffer=512)
+        pygame.mixer.pre_init(frequency=44100, size=-16, channels=2, buffer=1024)
         pygame.mixer.init()
         pygame.mixer.set_num_channels(20)
         
@@ -297,7 +324,7 @@ all_keys = black_keys + white_keys # black keys are checked first in hover detec
 prev_time = 0
 
 hovered_notes = []
-
+smoother = PositionSmoother(window=3)
 sound_engine = SoundEngine()
 while True:
     ret, frame = cap.read()
@@ -323,8 +350,13 @@ while True:
                     hand_label = result.multi_handedness[hand_idx].classification[0].label
 
             for finger_name, tip_id in fingertip_ids.items():
+                if not is_finger_extended(hand_landmarks, finger_name):
+                    tracker = get_tracker(hand_label, finger_name)
+                    tracker.update(None, time.time())   # force note_off if was holding
+                    continue
                 tip = hand_landmarks.landmark[tip_id]
                 tip_x, tip_y = int(tip.x * frame_w), int(tip.y * frame_h)
+                tip_x, tip_y = smoother.smooth(f"{hand_label}_{finger_name}", tip_x, tip_y)
 
                 # Which key is this finger over?
                 hovered_key = detect_finger_on_key(tip_x, tip_y, all_keys)
