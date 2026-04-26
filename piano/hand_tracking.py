@@ -3,6 +3,7 @@ import mediapipe as mp
 import time
 import pygame
 import os
+import numpy as np
 from collections import deque
 
 mp_hands = mp.solutions.hands
@@ -127,6 +128,73 @@ class HoverTracker: # Tracks which key a finger is hovering over, frame by frame
         # Remember for next frame
         self.prev_key_note = self.current_key_note
 
+class NoteTrail:
+    def __init__(self, max_notes=20):
+        self.notes = deque(maxlen=max_notes)
+    def add(self, note_name):
+        self.notes.append((note_name, time.time()))
+    def draw(self, frame, y=95):
+        now = time.time()
+        x = 10
+        for note, t in self.notes:
+            age = now - t
+            if age > 5.0:
+                continue
+            brightness = max(0, 1.0 - age / 5.0)
+            color = (0, int(200 * brightness), int(255 * brightness))
+            cv2.putText(frame, note, (x, y), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+            x += 50
+            if x > frame.shape[1] - 50:
+                break
+
+class Metronome:
+    def __init__(self, bpm=120):
+        self.bpm = bpm
+        self.enabled = False
+        self.last_beat = 0
+        self.beat_count = 0
+        self.click = self._make_click()
+
+    def _make_click(self):
+        sr = 44100
+        duration = 0.03
+        t = np.linspace(0, duration, int(sr * duration))
+        wave = np.sin(2 * np.pi * 1000 *t) * np.exp(-t * 50)
+        wave_int16 = (wave * 32767 * 0.3).astype(np.int16)
+        stereo = np.column_stack((wave_int16, wave_int16))
+        return pygame.sndarray.make_sound(stereo)
+    
+    def toggle(self):
+        self.enabled = not self.enabled
+        self.last_beat = time.time()
+        self.beat_count = 0
+
+    def update(self, frame, frame_w):
+        if not self.enabled:
+            return
+        now = time.time()
+        interval = 60.0 / self.bpm
+
+        if now - self.last_beat >= interval:
+            self.last_beat = now
+            self.beat_count += 1
+            self.click.play()
+        
+        phase = (now - self.last_beat) / interval
+        radius = int(15 * (1.0 - phase))
+
+        if self.beat_count % 4 == 1:
+            color = COLOR_YELLOW
+        else:
+            color = (0, 200, 200)
+        
+        cx = frame_w - 40
+        cy = 70
+        if radius > 0:
+            cv2.circle(frame, (cx, cy), radius, color, -1)
+        cv2.putText(frame, f"{self.bpm}BPM", (cx - 30, cy + 25), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (180, 180, 180), 1)
+
+
 def is_finger_extended(hand_landmarks, finger_name): # checks if the finger is extended by comparing the distance between the tip and pip joints, if the tip is above the pip, then the finger is considered extended
     joints = FINGER_JOINTS[finger_name]
     tip = hand_landmarks.landmark[joints["tip"]]
@@ -186,19 +254,24 @@ def draw_piano(frame, white_keys, black_keys): # draws semi transparent piano ke
 
     for key in white_keys:
         # Filled white rectangle
-        cv2.rectangle(overlay, (key["x1"], key["y1"]), (key["x2"], key["y2"]),
-                      key["color"], -1)
-        # Border
-        cv2.rectangle(overlay, (key["x1"], key["y1"]), (key["x2"], key["y2"]),
-                      (180, 180, 180), 1)
+        if key["color"] == COLOR_GREEN:
+            draw_y1 = key["y1"] + 4
+            draw_color = (0, 200, 0)
+        else:
+            draw_y1 = key["y1"]
+            draw_color = key["color"]
+        cv2.rectangle(overlay, (key["x1"], draw_y1), (key["x2"], key["y2"]), draw_color, -1)
+        cv2.rectangle(overlay, (key["x1"], draw_y1), (key["x2"], key["y2"]), (180, 180, 180), 1) # white border for white keys
 
     for key in black_keys:
-        # Filled dark rectangle
-        cv2.rectangle(overlay, (key["x1"], key["y1"]), (key["x2"], key["y2"]),
-                      key["color"], -1)
-        # Subtle highlight line at top for 3D effect
-        cv2.line(overlay, (key["x1"] + 2, key["y1"] + 2),
-                 (key["x2"] - 2, key["y1"] + 2), (80, 80, 80), 1)
+        if key["color"] == COLOR_GREEN:
+            draw_y1 = key["y1"] + 3    # 3px for black keys (they're shorter)
+            draw_color = (0, 180, 0)
+        else:
+            draw_y1 = key["y1"]
+            draw_color = key["color"]
+        cv2.rectangle(overlay, (key["x1"], draw_y1), (key["x2"], key["y2"]), draw_color, -1)
+        cv2.rectangle(overlay, (key["x1"], draw_y1), (key["x2"], key["y2"]), (80, 80, 80), 1) # dark gray border for black keys
         
     # Only blend the piano region (not the whole frame, saves resources)
     piano_top = white_keys[0]["y1"]
@@ -291,7 +364,7 @@ def reset_key_colors(white_keys, black_keys): # resets the keys color after the 
     for key in black_keys:
         key["color"] = key["color_default"]
 
-cap = cv2.VideoCapture(1)
+cap = cv2.VideoCapture(0)
 
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
@@ -324,8 +397,12 @@ all_keys = black_keys + white_keys # black keys are checked first in hover detec
 prev_time = 0
 
 hovered_notes = []
+note_trail = NoteTrail()
 smoother = PositionSmoother(window=3)
 sound_engine = SoundEngine()
+
+metronome = Metronome(bpm=120)
+
 while True:
     ret, frame = cap.read()
     if not ret:
@@ -391,6 +468,7 @@ while True:
                     note = hovered_key["note"]
                     print(f"🎹 NOTE ON:  {note} ({hand_label} {finger_name})")
                     sound_engine.note_on(note)
+                    note_trail.add(note)
                     key_cx = (hovered_key["x1"] + hovered_key["x2"]) // 2
                     key_cy = (hovered_key["y1"] + hovered_key["y2"]) // 2
                     cv2.circle(frame, (key_cx, key_cy), 20, COLOR_GREEN, 2)
@@ -426,9 +504,16 @@ while True:
     #label
     cv2.putText(frame, "AIR PIANO MODE", (frame_w - 250, 35),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
+    note_trail.draw(frame)
+
+    metronome.update(frame, frame_w)
     cv2.imshow("InstrumentalCV Piano", frame)
-    if cv2.waitKey(1) & 0xFF == ord('q'):
+    key_pressed = cv2.waitKey(1) & 0xFF
+    if key_pressed == ord('q'):
         break
+    elif key_pressed == ord('m'):
+        metronome.toggle()
+        print(f"Metronome: {'ON' if metronome.enabled else 'off'} (BPM: {metronome.bpm})")
 
 cap.release()
 cv2.destroyAllWindows()
