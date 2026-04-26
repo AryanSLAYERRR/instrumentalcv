@@ -64,7 +64,7 @@ def main():
     # download the sampled notes (A, C, D#, F# for octaves 3 and 4)
     available_samples = []
     
-    for octave in [2, 3, 4, 5]:  # download extra octaves for better pitch shifting
+    for octave in range(1, 8):  # download extra octaves for better pitch shifting
         for note in SAMPLED_NOTES:
             note_name = f"{note}{octave}"
             # URL uses %23 for # in note names
@@ -96,7 +96,7 @@ def main():
     
     # generate all 24 notes (C3-B4) by pitch-shifting nearest sample
     generated = 0
-    for octave in [3, 4]:
+    for octave in range (1, 8):
         for note in CHROMATIC:
             note_name = f"{note}{octave}"
             out_path = os.path.join(sounds_dir, f"{note_name}.wav")
@@ -152,7 +152,7 @@ def main():
             except Exception as e:
                 print(f"  ERROR generating {note_name}: {e}")
     
-    print(f"\nDone! {generated}/24 piano sounds ready in: {sounds_dir}")
+    print(f"\nDone! {generated}/84 piano sounds ready in: {sounds_dir}")
     print("You can now run the piano! Press 'q' to quit.\n")
 
 if __name__ == "__main__":

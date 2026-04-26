@@ -206,7 +206,7 @@ def is_finger_extended(hand_landmarks, finger_name): # checks if the finger is e
     else:
         return tip.y < pip.y  # in mediapipe, y=0 is top of image, so above means smaller y value
     
-def generate_piano_keys(frame_w, frame_h): # generates piano keys and returns there coordinates and corresponding notes
+def generate_piano_keys(frame_w, frame_h, start_octave=3): # generates piano keys and returns there coordinates and corresponding notes
     white_keys = []
     black_keys = []
     
@@ -219,7 +219,7 @@ def generate_piano_keys(frame_w, frame_h): # generates piano keys and returns th
     black_key_w = int(white_key_w * 0.6)
 
     for i in range(WHITE_KEY_COUNT):
-        octave = 3 + (i // 7) # first 7 keys octave 4, next 7 octave 5
+        octave = start_octave + (i // 7) # first 7 keys octave 4, next 7 octave 5
         note_idx = i % 7
         note_name = f"{WHITE_NOTES[note_idx]}{octave}"
 
@@ -231,7 +231,7 @@ def generate_piano_keys(frame_w, frame_h): # generates piano keys and returns th
         white_keys.append({"note": note_name, "x1": x1, "y1": y1, "x2": x2, "y2": y2, "is_black": False, "color_default": COLOR_WHITE, "color_hover": WHITE_KEY_HOVER_COLOR, "color": COLOR_WHITE})
 
     for i in range(WHITE_KEY_COUNT):
-        octave = 3 + (i // 7)
+        octave = start_octave + (i // 7)
         note_idx = i % 7
         if note_idx in BLACK_KEY_AFTER:
             note_name = f"{BLACK_NOTES[note_idx]}{octave}"
@@ -302,6 +302,12 @@ def draw_piano(frame, white_keys, black_keys): # draws semi transparent piano ke
     
     if white_keys:
         cv2.line(frame, (0, piano_top), (frame.shape[1], piano_top), (0, 200, 255), 2) # top edge of piano with orange color
+current_octave = 3
+
+def rebuild_piano():
+    global white_keys, black_keys, all_keys
+    white_keys, black_keys = generate_piano_keys(w, h, current_octave)
+    all_keys = black_keys + white_keys
 
 DEAD_ZONE_PX = 3
 def detect_finger_on_key(finger_x, finger_y, all_keys): # checks if finger is inside a key, using the coordiantes of the finger, if they lie between the right and left edge of the key
@@ -504,16 +510,35 @@ while True:
     #label
     cv2.putText(frame, "AIR PIANO MODE", (frame_w - 250, 35),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 200, 255), 2)
+    cv2.putText(frame, f"Octave: C{current_octave} - B{current_octave + 1}", (frame_w - 250, 65), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (180, 180, 180), 1)
     note_trail.draw(frame)
 
     metronome.update(frame, frame_w)
     cv2.imshow("InstrumentalCV Piano", frame)
-    key_pressed = cv2.waitKey(1) & 0xFF
+    key_pressed = cv2.waitKeyEx(1)
     if key_pressed == ord('q'):
         break
     elif key_pressed == ord('m'):
         metronome.toggle()
         print(f"Metronome: {'ON' if metronome.enabled else 'off'} (BPM: {metronome.bpm})")
+    elif metronome.enabled and key_pressed == ord('+'):
+        metronome.bpm += 5
+        print(f"Metronome BPM: {metronome.bpm}")
+    elif metronome.enabled and key_pressed == ord('-'):
+        metronome.bpm -= 5
+        print(f"Metronome BPM: {metronome.bpm}")
+    elif key_pressed == 2424832: # left arrrow
+        if current_octave > 1:
+            current_octave -= 1
+            rebuild_piano()
+            print(f"Octave: C{current_octave} - B{current_octave + 1}")
+    elif key_pressed == 2555904: # right arrow
+        if current_octave < 6:
+            current_octave += 1
+            rebuild_piano()
+            print(f"Octave: C{current_octave} - B{current_octave + 1}")
+    elif key_pressed != -1:
+        print(f"Key pressed: {key_pressed}")
 
 cap.release()
 cv2.destroyAllWindows()
