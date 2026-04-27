@@ -2,11 +2,11 @@ import json
 import os
 import subprocess
 import sys
+import tkinter as tk
 from pathlib import Path
-
 import cv2
 import customtkinter as ctk
-from PIL import Image
+from PIL import Image, ImageTk
 
 
 APP_DIR = Path(__file__).resolve().parent
@@ -14,6 +14,7 @@ HAND_TRACKING_SCRIPT = APP_DIR / "hand_tracking.py"
 SETTINGS_FILE = APP_DIR / "user_settings.json"
 PREVIEW_WIDTH = 380
 PREVIEW_HEIGHT = 214
+CAMERA_DETECT_LIMIT = 1
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -45,6 +46,13 @@ SAMPLE_OPTIONS = [
     ("download_organ", "Organ", "organ"),
     ("download_reverb", "Reverb Piano", "reverb"),
 ]
+KEYBED_PRESETS = {
+    "Laptop webcam": {"piano_top": 34, "piano_bottom": 66, "piano_opacity": 60},
+    "Phone tripod": {"piano_top": 42, "piano_bottom": 78, "piano_opacity": 58},
+    "Wide room": {"piano_top": 28, "piano_bottom": 58, "piano_opacity": 65},
+    "Close-up hands": {"piano_top": 45, "piano_bottom": 86, "piano_opacity": 55},
+    "Custom": None,
+}
 
 DEFAULT_SETTINGS = {
     "mode": "Air Piano",
@@ -77,20 +85,36 @@ DEFAULT_SETTINGS = {
     "download_electronic": True,
     "download_organ": True,
     "download_reverb": True,
+    "keybed_preset": "Laptop webcam",
+
 }
 
 
-def get_camera_backend():
-    return cv2.CAP_DSHOW if os.name == "nt" else cv2.CAP_ANY
+def camera_backends(include_fallback=False):
+    if os.name == "nt":
+        backends = [cv2.CAP_MSMF]
+        if include_fallback:
+            backends.append(cv2.CAP_DSHOW)
+        return backends
+    return [cv2.CAP_ANY]
 
 
-def detect_cameras(max_check=8):
+def open_camera(index, include_fallback=False):
+    for backend in camera_backends(include_fallback=include_fallback):
+        cap = cv2.VideoCapture(index, backend)
+        if cap.isOpened():
+            return cap
+        cap.release()
+    return None
+
+
+def detect_cameras(max_check=CAMERA_DETECT_LIMIT):
     available = []
     for index in range(max_check):
-        cap = cv2.VideoCapture(index, get_camera_backend())
-        if cap.isOpened():
+        cap = open_camera(index, include_fallback=False)
+        if cap is not None:
             available.append(str(index))
-        cap.release()
+            cap.release()
     return available or ["0"]
 
 
@@ -126,6 +150,13 @@ class PianoLauncher(ctk.CTk):
         self.process = None
         self.setup_process = None
         self.sample_switches = {}
+        self.preview_cap = None
+        self.preview_running = False
+        self.preview_image = None
+        self.preview_photo = None
+        self.preview_after_id = None
+        self.preview_canvas_image_id = None
+        self.preview_canvas_text_id = None
         self.cameras = detect_cameras()
         self.settings = load_settings()
         if self.settings["camera"] not in self.cameras:
@@ -179,6 +210,8 @@ class PianoLauncher(ctk.CTk):
             "download_electronic": ctk.BooleanVar(value=bool(settings["download_electronic"])),
             "download_organ": ctk.BooleanVar(value=bool(settings["download_organ"])),
             "download_reverb": ctk.BooleanVar(value=bool(settings["download_reverb"])),
+            "keybed_preset": ctk.StringVar(value=settings["keybed_preset"]),
+
         }
 
     def _build_header(self):
@@ -225,8 +258,9 @@ class PianoLauncher(ctk.CTk):
 
         self._build_mode_section(left, 0)
         self._build_camera_section(left, 1)
-        self._build_sound_section(left, 2)
-        self._build_tracking_section(left, 3)
+        self._build_camera_preview_section(left, 2)
+        self._build_sound_section(left, 3)
+        self._build_tracking_section(left, 4)
         self._build_piano_layout_section(right, 0)
         self._build_metronome_section(right, 1)
         self._build_controls_section(right, 2)
@@ -399,10 +433,48 @@ class PianoLauncher(ctk.CTk):
         self._switch(section, 3, "Mirror camera preview", self.vars["mirror"])
         ctk.CTkFrame(section, height=8, fg_color="transparent").grid(row=4, column=0)
 
+    def _build_camera_preview_section(self, parent, row):
+        section = self._section(parent, "Camera Preview", row)
+
+        self.preview_canvas = tk.Canvas(
+            section,
+            width=PREVIEW_WIDTH,
+            height=PREVIEW_HEIGHT,
+            bg="#0a0d12",
+            bd=0,
+            highlightthickness=0,
+            relief="flat",
+        )
+        self.preview_canvas.grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 10))
+        self._draw_preview_placeholder("Preview stopped")
+
+        controls = ctk.CTkFrame(section, fg_color="transparent")
+        controls.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 14))
+        controls.grid_columnconfigure((0, 1), weight=1)
+
+        self.preview_btn = ctk.CTkButton(
+            controls,
+            text="Start Preview",
+            fg_color=PANEL_ALT,
+            hover_color=BORDER,
+            command=self._toggle_preview,
+        )
+        self.preview_btn.grid(row=0, column=0, sticky="ew", padx=(0, 6))
+
+        ctk.CTkButton(
+            controls,
+            text="Test Camera",
+            fg_color=PANEL_ALT,
+            hover_color=BORDER,
+            command=self._test_camera,
+        ).grid(row=0, column=1, sticky="ew", padx=(6, 0))
+
+
+
     def _build_sound_section(self, parent, row):
         section = self._section(parent, "Sound", row)
         self._combo(section, 1, "Instrument", self.vars["instrument"], list(INSTRUMENTS.keys()))
-        self._slider(section, 2, "Starting octave", self.vars["octave"], 1, 6, 5, "octave", formatter=lambda value: f"C{value}")
+        self._slider(section, 2, "Starting octave", self.vars["octave"], 1, 6, 5, "octave", formatter=lambda value: f"C{value}") 
         self._combo(section, 3, "Octaves shown", self.vars["piano_octaves"], ["1", "2", "3", "4"], command=lambda _value: self._normalize_octave())
         self._slider(section, 4, "Volume", self.vars["volume"], 0, 100, 100, "volume", "%")
         self._slider(section, 5, "Note fadeout", self.vars["fadeout_ms"], 30, 1200, 117, "fadeout_ms", " ms")
@@ -422,11 +494,12 @@ class PianoLauncher(ctk.CTk):
 
     def _build_piano_layout_section(self, parent, row):
         section = self._section(parent, "Piano Layout", row)
-        self._slider(section, 1, "Keybed top", self.vars["piano_top"], 10, 70, 60, "piano_top", "%", command=self._sync_piano_bounds)
-        self._slider(section, 2, "Keybed bottom", self.vars["piano_bottom"], 30, 92, 62, "piano_bottom", "%", command=self._sync_piano_bounds)
-        self._slider(section, 3, "Key opacity", self.vars["piano_opacity"], 25, 95, 70, "piano_opacity", "%")
-        self._switch(section, 4, "Show note labels", self.vars["show_note_labels"])
-        self._switch(section, 5, "Show note trail", self.vars["show_note_trail"])
+        self._combo(section, 1,"Preset", self.vars["keybed_preset"], list(KEYBED_PRESETS.keys()), command=self._apply_keybed_preset)
+        self._slider(section, 2, "Keybed top", self.vars["piano_top"], 10, 70, 60, "piano_top", "%", command=self._mark_keybed_custom_and_sync)
+        self._slider(section, 3, "Keybed bottom", self.vars["piano_bottom"], 30, 92, 62, "piano_bottom", "%", command=self._mark_keybed_custom_and_sync)
+        self._slider(section, 4, "Key opacity", self.vars["piano_opacity"], 25, 95, 70, "piano_opacity", "%", command=self._mark_keybed_custom)
+        self._switch(section, 5, "Show note labels", self.vars["show_note_labels"])
+        self._switch(section, 6, "Show note trail", self.vars["show_note_trail"])
         ctk.CTkFrame(section, height=8, fg_color="transparent").grid(row=6, column=0)
 
     def _build_metronome_section(self, parent, row):
@@ -580,6 +653,26 @@ class PianoLauncher(ctk.CTk):
             )
         if hasattr(self, "launch_btn") and self.process is None and self.vars["mode"].get() == "Air Piano":
             self.launch_btn.configure(state="disabled" if is_running else "normal")
+    def _apply_keybed_preset(self, preset_name=None):
+        preset_name = preset_name or self.vars["keybed_preset"].get()
+        preset = KEYBED_PRESETS.get(preset_name)
+
+        if preset is None:
+            return
+        self.vars["piano_top"].set(preset["piano_top"])
+        self.vars["piano_bottom"].set(preset["piano_bottom"])
+        self.vars["piano_opacity"].set(preset["piano_opacity"])
+        self._sync_piano_bounds()
+        self._sync_slider_label("piano_opacity")
+        self._set_status(f"Applied {preset_name} keybed preset.", SUCCESS)
+
+    def _mark_keybed_custom(self):
+        self.vars["keybed_preset"].set("Custom")
+
+    def _mark_keybed_custom_and_sync(self):
+        self._mark_keybed_custom()
+        self._sync_piano_bounds()
+
 
     def _sync_piano_bounds(self):
         top = int(float(self.vars["piano_top"].get()))
@@ -618,12 +711,120 @@ class PianoLauncher(ctk.CTk):
                 self.launch_btn.configure(text="Launch Air Piano", state="disabled" if setup_running else "normal")
 
     def _refresh_cameras(self):
+        self._stop_preview()
         self.cameras = detect_cameras()
         self.camera_combo.configure(values=self.cameras)
         if self.vars["camera"].get() not in self.cameras:
             self.vars["camera"].set(self.cameras[0])
         self._refresh_readiness_labels()
         self._set_status(f"Found {len(self.cameras)} camera option(s).", SUCCESS)
+
+    def _draw_preview_placeholder(self, text):
+        if not hasattr(self, "preview_canvas"):
+            return
+        self.preview_canvas.delete("all")
+        self.preview_canvas_image_id = None
+        self.preview_canvas_text_id = self.preview_canvas.create_text(
+            PREVIEW_WIDTH // 2,
+            PREVIEW_HEIGHT // 2,
+            text=text,
+            fill=TEXT_MUTED,
+            font=("Segoe UI", 13),
+        )
+
+    def _toggle_preview(self):
+        if self.preview_running:
+            self._stop_preview()
+        else:
+            self._start_preview()
+
+    def _start_preview(self):
+        self._stop_preview()
+
+        try:
+            camera_index = int(self.vars["camera"].get())
+        except ValueError:
+            self._set_status("Camera must be a numeric device index.", DANGER)
+            return
+
+        self.preview_cap = open_camera(camera_index, include_fallback=True)
+        if self.preview_cap is None:
+            self._set_status(f"Camera {camera_index} could not be opened.", DANGER)
+            return
+
+        self.preview_running = True
+        self.preview_btn.configure(text="Stop Preview")
+        self._set_status(f"Previewing camera {camera_index}.", SUCCESS)
+        self._update_preview_frame()
+
+    def _stop_preview(self):
+        self.preview_running = False
+
+        if self.preview_after_id is not None:
+            try:
+                self.after_cancel(self.preview_after_id)
+            except Exception:
+                pass
+            self.preview_after_id = None
+
+        if self.preview_cap is not None:
+            self.preview_cap.release()
+            self.preview_cap = None
+
+        if hasattr(self, "preview_btn"):
+            self.preview_btn.configure(text="Start Preview")
+        self._draw_preview_placeholder("Preview stopped")
+        self.preview_photo = None
+        self.preview_image = None
+    
+    def _update_preview_frame(self):
+        if not self.preview_running or self.preview_cap is None:
+            return
+
+        ok, frame = self.preview_cap.read()
+        if not ok:
+            self._stop_preview()
+            self._set_status("Camera preview stopped because frames were not available.", DANGER)
+            return
+
+        if self.vars["mirror"].get():
+            frame = cv2.flip(frame, 1)
+
+        frame = cv2.resize(frame, (PREVIEW_WIDTH, PREVIEW_HEIGHT))
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        self.preview_image = Image.fromarray(frame)
+        self.preview_photo = ImageTk.PhotoImage(self.preview_image, master=self)
+        if self.preview_canvas_image_id is None:
+            self.preview_canvas.delete("all")
+            self.preview_canvas_text_id = None
+            self.preview_canvas_image_id = self.preview_canvas.create_image(
+                0,
+                0,
+                anchor="nw",
+                image=self.preview_photo,
+            )
+        else:
+            self.preview_canvas.itemconfig(self.preview_canvas_image_id, image=self.preview_photo)
+        self.preview_after_id = self.after(50, self._update_preview_frame)
+    
+    def _test_camera(self):
+        try:
+            camera_index = int(self.vars["camera"].get())
+        except ValueError:
+            self._set_status("Camera must be a numeric device index.", DANGER)
+            return
+
+        cap = open_camera(camera_index, include_fallback=True)
+        ok = cap is not None
+        if ok:
+            ok, _frame = cap.read()
+            cap.release()
+
+        if ok:
+            self._set_status(f"Camera {camera_index} is working.", SUCCESS)
+        else:
+            self._set_status(f"Camera {camera_index} is not returning frames.", DANGER)
+
 
     def _refresh_readiness_labels(self):
         ready = []
@@ -646,7 +847,7 @@ class PianoLauncher(ctk.CTk):
     def _readiness_text(self):
         missing = [label for label, folder in INSTRUMENTS.items() if not list((APP_DIR / folder).glob("*.wav"))]
         if missing:
-            return "Some sample packs are missing. Run setup_sounds.py before publishing."
+            return "Some sample packs are missing. Choose the ones you want and download them"
         return "Ready. Settings are saved automatically on launch."
 
     def _collect_settings(self):
@@ -681,6 +882,7 @@ class PianoLauncher(ctk.CTk):
             "download_electronic": bool(self.vars["download_electronic"].get()),
             "download_organ": bool(self.vars["download_organ"].get()),
             "download_reverb": bool(self.vars["download_reverb"].get()),
+            "keybed_preset": self.vars["keybed_preset"].get(),
         }
 
     def _save_settings(self):
@@ -836,6 +1038,7 @@ class PianoLauncher(ctk.CTk):
 
 
     def _launch(self):
+        self._stop_preview()
         if self.setup_process is not None and self.setup_process.poll() is None:
             self._set_status("Wait for sample setup to finish before launching.", WARNING)
             return
@@ -895,6 +1098,7 @@ class PianoLauncher(ctk.CTk):
 
     def _on_close(self):
         self._save_settings()
+        self._stop_preview()
         if self.process is not None and self.process.poll() is None:
             self.process.terminate()
         if self.setup_process is not None and self.setup_process.poll() is None:

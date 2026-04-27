@@ -517,7 +517,7 @@ def draw_hud(frame, config, current_octave, hovered_notes, fps, sound_engine, me
 
 
 def get_camera_backend():
-    return cv2.CAP_DSHOW if os.name == "nt" else cv2.CAP_ANY
+    return cv2.CAP_MSMF if os.name == "nt" else cv2.CAP_ANY
 
 
 def release_inactive_trackers(finger_trackers, active_tracker_keys, current_time, sound_engine, fadeout_ms):
