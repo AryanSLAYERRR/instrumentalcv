@@ -50,6 +50,81 @@ def pitch_shift(audio_data, sample_rate, semitones):
         return audio_data
     shifted = resample(audio_data, new_length)
     return shifted.astype(np.float32)
+def make_bright(audio, sr):
+    from scipy.signal import butter, lfilter
+    b, a = butter(2, 2000 / (sr / 2), btype='high')
+    highs = lfilter(b, a, audio, axis=0)
+    return np.clip(audio + highs * 1.5, -1, 1).astype(np.float32)
+
+def make_electronic(audio, sr):
+    from scipy.signal import butter, lfilter
+    b, a = butter(4, 3000 / (sr / 2), btype='low')
+    return lfilter(b, a, audio, axis=0).astype(np.float32)
+
+def make_organ(audio, sr):
+    """Organ: heavy reverb + low-pass for a smooth sustained pad sound."""
+    from scipy.signal import butter, lfilter
+    
+    # Low-pass filter — remove the sharp piano "hammer" attack
+    b, a = butter(3, 1500 / (sr / 2), btype='low')
+    smooth = lfilter(b, a, audio, axis=0)
+    
+    # Layer delayed copies for sustained drone effect
+    result = smooth.astype(np.float64).copy()
+    delays = [(50, 0.5), (100, 0.35), (200, 0.25), (350, 0.15)]
+    
+    for delay_ms, gain in delays:
+        n = int(delay_ms * sr / 1000)
+        delayed = np.zeros_like(result)
+        if len(result.shape) > 1:
+            delayed[n:] = result[:-n] * gain
+        else:
+            delayed[n:] = result[:-n] * gain
+        result += delayed
+    
+    # Normalize
+    mx = np.max(np.abs(result))
+    if mx > 0:
+        result /= mx
+    
+    return (result * 0.8).astype(np.float32)
+
+def make_reverb(audio, sr, amount=0.35):
+    """Add room reverb to piano samples."""
+    result = audio.astype(np.float64).copy()
+    delays = [(23, 0.4), (47, 0.25), (71, 0.15)]
+    for delay_ms, gain in delays:
+        n = int(delay_ms * sr / 1000)
+        delayed = np.zeros_like(result)
+        if len(result.shape) > 1:
+            delayed[n:] = result[:-n] * gain
+        else:
+            delayed[n:] = result[:-n] * gain
+        result += delayed
+    mx = np.max(np.abs(result))
+    if mx > 0:
+        result /= mx
+    return ((1 - amount) * audio + amount * result).astype(np.float32)
+    
+def generate_variant(base_dir, variant_name, process_fn):
+    src_dir = os.path.join(base_dir, "sounds")
+    dst_dir = os.path.join(base_dir, "sounds_" + variant_name)
+    os.makedirs(dst_dir, exist_ok=True)
+
+    print(f"\nGenerating {variant_name} variant...")
+    count = 0
+    for filename in os.listdir(src_dir):
+        if filename.endswith('.wav'):
+            dst_path = os.path.join(dst_dir, filename)
+            if os.path.exists(dst_path):
+                count += 1
+                continue
+            src_path = os.path.join(src_dir, filename)
+            audio, sr = sf.read(src_path)
+            processed = process_fn(audio, sr)
+            sf.write(dst_path, processed, sr)
+            count += 1
+    print(f"Generated {count} {variant_name} samples in: {dst_dir}")
 
 def main():
     sounds_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sounds")
@@ -135,7 +210,7 @@ def main():
                 else:
                     shifted[:fade_in_samples] *= np.linspace(0, 1, fade_in_samples)
                 
-                # Fade-out (50ms) at end to prevent crackle on sample end
+                # fadeot (50ms) at end to prevent crackle on sample end
                 fade_out_samples = int(0.05 * sr)
                 if len(shifted.shape) > 1:
                     for ch in range(shifted.shape[1]):
@@ -151,9 +226,15 @@ def main():
                 
             except Exception as e:
                 print(f"  ERROR generating {note_name}: {e}")
-    
+    base = os.path.dirname(os.path.abspath(__file__))
+    generate_variant(base, "bright", make_bright)
+    generate_variant(base, "electronic", make_electronic)
+    generate_variant(base, "organ", make_organ)
+    generate_variant(base, "reverb", lambda audio, sr: make_reverb(audio, sr))
     print(f"\nDone! {generated}/84 piano sounds ready in: {sounds_dir}")
+    print("Instruments: sounds, sounds_bright, sounds_electronic, sounds_organ, sounds_reverb")
     print("You can now run the piano! Press 'q' to quit.\n")
+
 
 if __name__ == "__main__":
     main()
