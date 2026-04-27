@@ -6,11 +6,14 @@ from pathlib import Path
 
 import cv2
 import customtkinter as ctk
+from PIL import Image
 
 
 APP_DIR = Path(__file__).resolve().parent
 HAND_TRACKING_SCRIPT = APP_DIR / "hand_tracking.py"
 SETTINGS_FILE = APP_DIR / "user_settings.json"
+PREVIEW_WIDTH = 380
+PREVIEW_HEIGHT = 214
 
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -34,6 +37,14 @@ INSTRUMENTS = {
     "Organ": "sounds_organ",
     "Reverb Piano": "sounds_reverb",
 }
+
+SAMPLE_OPTIONS = [
+    ("download_grand", "Grand Piano", "grand"),
+    ("download_bright", "Bright Piano", "bright"),
+    ("download_electronic", "Electric Piano", "electronic"),
+    ("download_organ", "Organ", "organ"),
+    ("download_reverb", "Reverb Piano", "reverb"),
+]
 
 DEFAULT_SETTINGS = {
     "mode": "Air Piano",
@@ -60,6 +71,12 @@ DEFAULT_SETTINGS = {
     "fadeout_ms": 300,
     "metronome": False,
     "metronome_bpm": 120,
+    "download_all_samples": True,
+    "download_grand": True,
+    "download_bright": True,
+    "download_electronic": True,
+    "download_organ": True,
+    "download_reverb": True,
 }
 
 
@@ -107,6 +124,8 @@ class PianoLauncher(ctk.CTk):
         self.configure(fg_color=BG)
 
         self.process = None
+        self.setup_process = None
+        self.sample_switches = {}
         self.cameras = detect_cameras()
         self.settings = load_settings()
         if self.settings["camera"] not in self.cameras:
@@ -122,6 +141,7 @@ class PianoLauncher(ctk.CTk):
         self._build_body()
         self._build_footer()
         self._sync_all_labels()
+        self._sync_sample_selection_status()
         self._sync_mode_state()
         self._set_status(self._readiness_text(), SUCCESS)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -153,6 +173,12 @@ class PianoLauncher(ctk.CTk):
             "fadeout_ms": ctk.IntVar(value=int(settings["fadeout_ms"])),
             "metronome": ctk.BooleanVar(value=bool(settings["metronome"])),
             "metronome_bpm": ctk.IntVar(value=int(settings["metronome_bpm"])),
+            "download_all_samples": ctk.BooleanVar(value=bool(settings["download_all_samples"])),
+            "download_grand": ctk.BooleanVar(value=bool(settings["download_grand"])),
+            "download_bright": ctk.BooleanVar(value=bool(settings["download_bright"])),
+            "download_electronic": ctk.BooleanVar(value=bool(settings["download_electronic"])),
+            "download_organ": ctk.BooleanVar(value=bool(settings["download_organ"])),
+            "download_reverb": ctk.BooleanVar(value=bool(settings["download_reverb"])),
         }
 
     def _build_header(self):
@@ -205,6 +231,8 @@ class PianoLauncher(ctk.CTk):
         self._build_metronome_section(right, 1)
         self._build_controls_section(right, 2)
         self._build_readiness_section(right, 3)
+        self._build_sample_setup_section(right, 4)
+
 
     def _build_footer(self):
         footer = ctk.CTkFrame(self, fg_color=PANEL, corner_radius=10, border_width=1, border_color=BORDER)
@@ -307,13 +335,14 @@ class PianoLauncher(ctk.CTk):
         self.slider_labels[key] = (value_label, variable, suffix, formatter)
         return slider
 
-    def _switch(self, parent, row, label, variable):
+    def _switch(self, parent, row, label, variable, command=None):
         frame = ctk.CTkFrame(parent, fg_color="transparent")
         frame.grid(row=row, column=0, sticky="ew", padx=16, pady=5)
         switch = ctk.CTkSwitch(
             frame,
             text=label,
             variable=variable,
+            command=command,
             progress_color=ACCENT,
             button_color=TEXT,
             text_color=TEXT,
@@ -445,6 +474,35 @@ class PianoLauncher(ctk.CTk):
         self.camera_label.grid(row=2, column=0, sticky="ew", padx=16, pady=(0, 14))
         self._refresh_readiness_labels()
 
+    def _build_sample_setup_section(self, parent, row):
+        section = self._section(parent, "Sample Setup", row)
+        self.sample_switches["download_all_samples"] = self._switch(
+            section,
+            1,
+            "Download all instruments",
+            self.vars["download_all_samples"],
+            command=self._on_download_all_toggle,
+        )
+        for index, (var_name, label, _arg_name) in enumerate(SAMPLE_OPTIONS, start=2):
+            self.sample_switches[var_name] = self._switch(
+                section,
+                index,
+                label,
+                self.vars[var_name],
+                command=self._on_sample_choice_toggle,
+            )
+
+        self.sample_status_label = ctk.CTkLabel(section, text="", text_color=TEXT_MUTED, anchor="w", justify="left")
+        self.sample_status_label.grid(row=7, column=0, sticky="ew", padx=16, pady=(6, 0))
+        self.download_btn = ctk.CTkButton(
+            section,
+            text="Download Selected Samples",
+            fg_color=ACCENT,
+            hover_color=ACCENT_HOVER,
+            command=self._download_selected_samples,
+        )
+        self.download_btn.grid(row=8, column=0, sticky="ew", padx=16, pady=(10, 14))
+
     def _on_slider_change(self, key, extra_command=None):
         if extra_command:
             extra_command()
@@ -461,6 +519,67 @@ class PianoLauncher(ctk.CTk):
             self._sync_slider_label(key)
         self._normalize_octave()
         self._sync_piano_bounds()
+
+    def _on_download_all_toggle(self):
+        all_selected = bool(self.vars["download_all_samples"].get())
+        for var_name, _label, _arg_name in SAMPLE_OPTIONS:
+            self.vars[var_name].set(all_selected)
+        self._sync_sample_selection_status()
+
+    def _on_sample_choice_toggle(self):
+        all_selected = all(bool(self.vars[var_name].get()) for var_name, _label, _arg_name in SAMPLE_OPTIONS)
+        self.vars["download_all_samples"].set(all_selected)
+        self._sync_sample_selection_status()
+
+    def _selected_sample_args(self):
+        if self.vars["download_all_samples"].get():
+            return ["all"]
+        return [
+            arg_name
+            for var_name, _label, arg_name in SAMPLE_OPTIONS
+            if self.vars[var_name].get()
+        ]
+
+    def _sample_args_label(self, selected):
+        if selected == ["all"]:
+            return "all instrument packs"
+        labels_by_arg = {arg_name: label for _var_name, label, arg_name in SAMPLE_OPTIONS}
+        return ", ".join(labels_by_arg.get(arg_name, arg_name) for arg_name in selected)
+
+    def _sync_sample_selection_status(self):
+        if not hasattr(self, "sample_status_label"):
+            return
+
+        if self.vars["download_all_samples"].get():
+            for var_name, _label, _arg_name in SAMPLE_OPTIONS:
+                self.vars[var_name].set(True)
+
+        selected = self._selected_sample_args()
+        if selected == ["all"]:
+            text = "Selected: all instrument packs"
+            color = TEXT_MUTED
+        elif selected:
+            labels = [label for var_name, label, _arg_name in SAMPLE_OPTIONS if self.vars[var_name].get()]
+            text = "Selected: " + ", ".join(labels)
+            color = TEXT_MUTED
+        else:
+            text = "Select at least one sample pack."
+            color = WARNING
+
+        if self.setup_process is not None and self.setup_process.poll() is None:
+            text = "Downloading: " + self._sample_args_label(selected)
+            color = WARNING
+
+        self.sample_status_label.configure(text=text, text_color=color)
+
+    def _set_setup_controls(self, is_running):
+        if hasattr(self, "download_btn"):
+            self.download_btn.configure(
+                state="disabled" if is_running else "normal",
+                text="Downloading Samples..." if is_running else "Download Selected Samples",
+            )
+        if hasattr(self, "launch_btn") and self.process is None and self.vars["mode"].get() == "Air Piano":
+            self.launch_btn.configure(state="disabled" if is_running else "normal")
 
     def _sync_piano_bounds(self):
         top = int(float(self.vars["piano_top"].get()))
@@ -494,8 +613,9 @@ class PianoLauncher(ctk.CTk):
             self._set_status("Desk Mode is planned; switch back to Air Piano to launch today.", WARNING)
         else:
             self.mode_pill.configure(text="AIR PIANO", fg_color=ACCENT, text_color=TEXT)
+            setup_running = self.setup_process is not None and self.setup_process.poll() is None
             if self.process is None:
-                self.launch_btn.configure(text="Launch Air Piano", state="normal")
+                self.launch_btn.configure(text="Launch Air Piano", state="disabled" if setup_running else "normal")
 
     def _refresh_cameras(self):
         self.cameras = detect_cameras()
@@ -521,6 +641,7 @@ class PianoLauncher(ctk.CTk):
         else:
             self.samples_label.configure(text=f"Samples ready: {len(ready)}/{len(INSTRUMENTS)} instrument packs", text_color=TEXT_MUTED)
         self.camera_label.configure(text=f"Cameras detected: {', '.join(self.cameras)}")
+        self._sync_sample_selection_status()
 
     def _readiness_text(self):
         missing = [label for label, folder in INSTRUMENTS.items() if not list((APP_DIR / folder).glob("*.wav"))]
@@ -554,6 +675,12 @@ class PianoLauncher(ctk.CTk):
             "fadeout_ms": int(float(self.vars["fadeout_ms"].get())),
             "metronome": bool(self.vars["metronome"].get()),
             "metronome_bpm": int(float(self.vars["metronome_bpm"].get())),
+            "download_all_samples": bool(self.vars["download_all_samples"].get()),
+            "download_grand": bool(self.vars["download_grand"].get()),
+            "download_bright": bool(self.vars["download_bright"].get()),
+            "download_electronic": bool(self.vars["download_electronic"].get()),
+            "download_organ": bool(self.vars["download_organ"].get()),
+            "download_reverb": bool(self.vars["download_reverb"].get()),
         }
 
     def _save_settings(self):
@@ -567,6 +694,7 @@ class PianoLauncher(ctk.CTk):
         for key, value in DEFAULT_SETTINGS.items():
             self.vars[key].set(value)
         self._sync_all_labels()
+        self._sync_sample_selection_status()
         self._sync_mode_state()
         self._save_settings()
         self._set_status("Defaults restored.", SUCCESS)
@@ -650,7 +778,68 @@ class PianoLauncher(ctk.CTk):
             command.append("--metronome")
         return command
 
+    def _download_selected_samples(self):
+        if self.setup_process is not None and self.setup_process.poll() is None:
+            self._set_status("Sample setup is already running.", WARNING)
+            return
+        if self.process is not None and self.process.poll() is None:
+            self._set_status("Close the piano session before changing sample packs.", WARNING)
+            return
+
+        selected = self._selected_sample_args()
+        if not selected:
+            self._set_status("Select at least one instrument to download.", DANGER)
+            return
+
+        self._save_settings()
+        command = [
+            sys.executable,
+            str(APP_DIR / "setup_sounds.py"),
+            "--instruments",
+            *selected,
+        ]
+        try:
+            self.setup_process = subprocess.Popen(command, cwd=str(APP_DIR))
+        except OSError as exc:
+            self.setup_process = None
+            self._set_status(f"Sample setup failed to start: {exc}", DANGER)
+            return
+
+        self._set_setup_controls(True)
+        self._sync_sample_selection_status()
+        target = self._sample_args_label(selected)
+        self._set_status(f"Downloading {target}. This can take a few minutes.", WARNING)
+        self.after(1000, self._poll_setup_process)
+
+    def _poll_setup_process(self):
+        if self.setup_process is None:
+            return
+
+        exit_code = self.setup_process.poll()
+        if exit_code is None:
+            self.after(1000, self._poll_setup_process)
+            return
+
+        self.setup_process = None
+        self._set_setup_controls(False)
+        self._refresh_readiness_labels()
+
+        ready_count = sum(
+            1
+            for folder in INSTRUMENTS.values()
+            if (APP_DIR / folder).is_dir() and list((APP_DIR / folder).glob("*.wav"))
+        )
+        if exit_code == 0:
+            self._set_status(f"Sample setup complete. {ready_count}/{len(INSTRUMENTS)} packs are ready.", SUCCESS)
+        else:
+            self._set_status(f"Sample setup exited with code {exit_code}. Check the terminal output.", DANGER)
+
+
     def _launch(self):
+        if self.setup_process is not None and self.setup_process.poll() is None:
+            self._set_status("Wait for sample setup to finish before launching.", WARNING)
+            return
+
         valid, message = self._validate()
         if not valid:
             self._set_status(message, DANGER)
@@ -681,7 +870,8 @@ class PianoLauncher(ctk.CTk):
         self.process = None
         self.stop_btn.configure(state="disabled")
         if self.vars["mode"].get() == "Air Piano":
-            self.launch_btn.configure(state="normal", text="Launch Air Piano")
+            setup_running = self.setup_process is not None and self.setup_process.poll() is None
+            self.launch_btn.configure(state="disabled" if setup_running else "normal", text="Launch Air Piano")
         if exit_code == 0:
             self._set_status("Piano session closed.", TEXT_MUTED)
         else:
@@ -691,7 +881,8 @@ class PianoLauncher(ctk.CTk):
         if self.process is None or self.process.poll() is not None:
             self.process = None
             self.stop_btn.configure(state="disabled")
-            self.launch_btn.configure(state="normal", text="Launch Air Piano")
+            setup_running = self.setup_process is not None and self.setup_process.poll() is None
+            self.launch_btn.configure(state="disabled" if setup_running else "normal", text="Launch Air Piano")
             return
         self.process.terminate()
         self._set_status("Stopping piano session...", WARNING)
@@ -706,6 +897,8 @@ class PianoLauncher(ctk.CTk):
         self._save_settings()
         if self.process is not None and self.process.poll() is None:
             self.process.terminate()
+        if self.setup_process is not None and self.setup_process.poll() is None:
+            self.setup_process.terminate()
         self.destroy()
 
 

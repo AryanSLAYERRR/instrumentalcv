@@ -1,10 +1,11 @@
-import urllib.request
+import argparse
 import os
 import sys
+import urllib.request
+
 import numpy as np
-from scipy.io import wavfile
 from scipy.signal import resample
-import soundfile as sf  
+import soundfile as sf
 
 # Notes sampled in the Salamander set (every 3 semitones)
 # Format: {note_name: filename_on_CDN}
@@ -16,6 +17,15 @@ CHROMATIC = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 VELOCITY = 8
 
 BASE_URL = "https://unpkg.com/@audio-samples/piano-velocity{vel}@1.0.3/audio"
+
+INSTRUMENT_LABELS = {
+    "grand": "Grand Piano",
+    "bright": "Bright Piano",
+    "electronic": "Electric Piano",
+    "organ": "Organ",
+    "reverb": "Reverb Piano",
+}
+
 
 def note_to_midi(note_name):
     if '#' in note_name:
@@ -105,7 +115,15 @@ def make_reverb(audio, sr, amount=0.35):
     if mx > 0:
         result /= mx
     return ((1 - amount) * audio + amount * result).astype(np.float32)
-    
+
+VARIANT_OPTIONS = {
+    "bright": make_bright,
+    "electronic": make_electronic,
+    "organ": make_organ,
+    "reverb": lambda audio, sr: make_reverb(audio, sr),
+}
+
+
 def generate_variant(base_dir, variant_name, process_fn):
     src_dir = os.path.join(base_dir, "sounds")
     dst_dir = os.path.join(base_dir, "sounds_" + variant_name)
@@ -126,7 +144,25 @@ def generate_variant(base_dir, variant_name, process_fn):
             count += 1
     print(f"Generated {count} {variant_name} samples in: {dst_dir}")
 
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Download and generate InstrumentalCV piano samples.")
+    parser.add_argument(
+        "--instruments",
+        nargs="+",
+        default=["grand"],
+        choices=["grand", "bright", "electronic", "organ", "reverb", "all"],
+        help="Sample packs to prepare. Variants require the base Grand Piano samples.",
+    )
+    return parser.parse_args()
+
+
 def main():
+    args = parse_args()
+    selected = set(args.instruments)
+    if "all" in selected:
+        selected = set(INSTRUMENT_LABELS)
+
     sounds_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sounds")
     raw_dir = os.path.join(sounds_dir, "raw")
     os.makedirs(raw_dir, exist_ok=True)
@@ -134,11 +170,12 @@ def main():
     print("=" * 60)
     print("  Salamander Grand Piano V3 - Sample Downloader")
     print("  Source: darosh/samples-piano (MIT License)")
+    print("  Selected: " + ", ".join(INSTRUMENT_LABELS[name] for name in sorted(selected)))
     print("=" * 60)
     
     # download the sampled notes (A, C, D#, F# for octaves 3 and 4)
     available_samples = []
-    
+
     for octave in range(1, 8):  # download extra octaves for better pitch shifting
         for note in SAMPLED_NOTES:
             note_name = f"{note}{octave}"
@@ -164,7 +201,7 @@ def main():
     
     if not available_samples:
         print("\nERROR: No samples downloaded! Check your internet connection.")
-        return
+        return 1
     
     print(f"\nDownloaded {len(available_samples)} reference samples.")
     print("Generating all piano notes by pitch-shifting...\n")
@@ -203,14 +240,14 @@ def main():
                     shifted = pitch_shift(audio, sr, semitone_shift)
                 
                 # save as WAV
-                fade_in_samples = int(0.005 * sr)  # 5ms — very short, won't affect attack
+                fade_in_samples = int(0.005 * sr)  # 5ms
                 if len(shifted.shape) > 1:
                     for ch in range(shifted.shape[1]):
                         shifted[:fade_in_samples, ch] *= np.linspace(0, 1, fade_in_samples)
                 else:
                     shifted[:fade_in_samples] *= np.linspace(0, 1, fade_in_samples)
                 
-                # fadeot (50ms) at end to prevent crackle on sample end
+                # fadeout (50ms) at end to prevent crackle on sample end
                 fade_out_samples = int(0.05 * sr)
                 if len(shifted.shape) > 1:
                     for ch in range(shifted.shape[1]):
@@ -226,15 +263,21 @@ def main():
                 
             except Exception as e:
                 print(f"  ERROR generating {note_name}: {e}")
+
+    if generated == 0:
+        print("\nERROR: No playable WAV files were generated.")
+        return 1
+
     base = os.path.dirname(os.path.abspath(__file__))
-    generate_variant(base, "bright", make_bright)
-    generate_variant(base, "electronic", make_electronic)
-    generate_variant(base, "organ", make_organ)
-    generate_variant(base, "reverb", lambda audio, sr: make_reverb(audio, sr))
+    for variant_name, process_fn in VARIANT_OPTIONS.items():
+        if variant_name in selected:
+            generate_variant(base, variant_name, process_fn)
+
     print(f"\nDone! {generated}/84 piano sounds ready in: {sounds_dir}")
-    print("Instruments: sounds, sounds_bright, sounds_electronic, sounds_organ, sounds_reverb")
+    print("Selected instruments ready: " + ", ".join(INSTRUMENT_LABELS[name] for name in sorted(selected)))
     print("You can now run the piano! Press 'q' to quit.\n")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
