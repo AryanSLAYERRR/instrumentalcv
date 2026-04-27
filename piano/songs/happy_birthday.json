@@ -1,0 +1,81 @@
+{
+  "title": "Happy Birthday",
+  "author": "Traditional",
+  "bpm": 120,
+  "base_octave": 4,
+  "octaves_used": 1,
+  "notes": [
+    {
+      "note": "C4",
+      "time": 0,
+      "duration": 0.75,
+      "hand": "any"
+    },
+    {
+      "note": "C4",
+      "time": 0.75,
+      "duration": 0.25,
+      "hand": "any"
+    },
+    {
+      "note": "D4",
+      "time": 1,
+      "duration": 1,
+      "hand": "any"
+    },
+    {
+      "note": "C4",
+      "time": 2,
+      "duration": 1,
+      "hand": "any"
+    },
+    {
+      "note": "F4",
+      "time": 3,
+      "duration": 1,
+      "hand": "any"
+    },
+    {
+      "note": "E4",
+      "time": 4,
+      "duration": 2,
+      "hand": "any"
+    },
+    {
+      "note": "C4",
+      "time": 6,
+      "duration": 0.75,
+      "hand": "any"
+    },
+    {
+      "note": "C4",
+      "time": 6.75,
+      "duration": 0.25,
+      "hand": "any"
+    },
+    {
+      "note": "D4",
+      "time": 7,
+      "duration": 1,
+      "hand": "any"
+    },
+    {
+      "note": "C4",
+      "time": 8,
+      "duration": 1,
+      "hand": "any"
+    },
+    {
+      "note": "G4",
+      "time": 9,
+      "duration": 1,
+      "hand": "any"
+    },
+    {
+      "note": "F4",
+      "time": 10,
+      "duration": 2,
+      "hand": "any"
+    }
+  ]
+}

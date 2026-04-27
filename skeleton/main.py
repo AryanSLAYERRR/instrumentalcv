@@ -8,14 +8,14 @@ mp_draw = mp.solutions.drawing_utils
 hands = mp_hands.Hands()
 pose = mp_pose.Pose()
 
-cap = cv2.VideoCapture(0)
+cap = cv2.VideoCapture(1)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
 prev_time = 0
 curr_time = 0
 
 prev_wrist_y = 0
-
+last_strum_time = 0
 while True:
     ret, frame = cap.read()
     if not ret:
@@ -38,9 +38,16 @@ while True:
 
             speed = wrist_y - prev_wrist_y
             speed = round(speed, 3)
-            if speed > 0.05:
-                 print("STRUM!")
-                 cv2.putText(frame, "STRUM!", (500,80), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 255, 0), 3)
+            now = time.time()
+
+            if speed > 0.05 and (now - last_strum_time) > 0.4:
+                last_strum_time = now
+                print("DOWNSTRUM!")
+                cv2.putText(frame, "DOWNSTRUM!", (500,80), cv2.FONT_HERSHEY_SIMPLEX, 2, (0, 255, 0), 3)
+            elif speed < -0.05 and (now - last_strum_time) > 0.4:
+                last_strum_time = now
+                print("UPSTRUM!")
+                cv2.putText(frame, "UPSTRUM!", (500,80), cv2.FONT_HERSHEY_SIMPLEX, 2, (255, 165, 0), 3)
             prev_wrist_y = wrist_y
             print("Right Wrist Y:", wrist_y, "| Speed:", speed)
 

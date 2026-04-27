@@ -35,3 +35,17 @@ Thumbs.db
 tmp/
 temp/
 *.tmp
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# InstrumentalCV generated local assets/settings
+piano/user_settings.json
+piano/sounds/
+piano/sounds_bright/
+piano/sounds_electronic/
+piano/sounds_organ/
+piano/sounds_reverb/

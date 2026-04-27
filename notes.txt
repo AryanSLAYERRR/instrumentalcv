@@ -1,0 +1,7 @@
+mp ---> tracks 21 points on each hand
+
+To do:
+
+add calibration for hands, when using mobile device,( left hand, right hand)
+add desk calibration
+add camera calibration

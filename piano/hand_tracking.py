@@ -170,7 +170,7 @@ def parse_args(argv=None):
     )
 
 
-class PositionSmoother:
+class PositionSmoother: # reduces jitter of finger accross frames
     def __init__(self, window=3):
         self.history = {}
         self.window = window
@@ -300,7 +300,7 @@ class SoundEngine:
         pygame.mixer.init()
         pygame.mixer.set_num_channels(32)
 
-    def load_instrument(self, folder_name="sounds"):
+    def load_instrument(self, folder_name="sounds"): # loads the chrods of diff instruments
         base_dir = os.path.dirname(os.path.abspath(__file__))
         sounds_dir = os.path.join(base_dir, folder_name)
         loaded = self._load_from_dir(sounds_dir)
@@ -308,7 +308,7 @@ class SoundEngine:
             self.current_instrument = folder_name
         return loaded
 
-    def _load_from_dir(self, sounds_dir):
+    def _load_from_dir(self, sounds_dir):  #for loading downloaded notes from sounds folder
         self.last_error = None
         if not os.path.isdir(sounds_dir):
             self.last_error = f"Missing sound folder: {os.path.basename(sounds_dir)}"
@@ -361,7 +361,7 @@ class SoundEngine:
         pygame.mixer.quit()
 
 
-def is_finger_extended(hand_landmarks, finger_name):
+def is_finger_extended(hand_landmarks, finger_name):  #only plays if tip joint is above the pip joint
     joints = FINGER_JOINTS[finger_name]
     tip = hand_landmarks.landmark[joints["tip"]]
     pip = hand_landmarks.landmark[joints["pip"]]
@@ -517,7 +517,7 @@ def draw_hud(frame, config, current_octave, hovered_notes, fps, sound_engine, me
 
 
 def get_camera_backend():
-    return cv2.CAP_MSMF if os.name == "nt" else cv2.CAP_ANY
+    return cv2.CAP_DSHOW if os.name == "nt" else cv2.CAP_ANY
 
 
 def release_inactive_trackers(finger_trackers, active_tracker_keys, current_time, sound_engine, fadeout_ms):

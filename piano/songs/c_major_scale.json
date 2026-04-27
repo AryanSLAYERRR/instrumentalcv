@@ -1,0 +1,57 @@
+{
+  "title": "C Major Scale",
+  "author": "Practice",
+  "bpm": 90,
+  "base_octave": 4,
+  "octaves_used": 2,
+  "notes": [
+    {
+      "note": "C4",
+      "time": 0,
+      "duration": 1,
+      "hand": "any"
+    },
+    {
+      "note": "D4",
+      "time": 1,
+      "duration": 1,
+      "hand": "any"
+    },
+    {
+      "note": "E4",
+      "time": 2,
+      "duration": 1,
+      "hand": "any"
+    },
+    {
+      "note": "F4",
+      "time": 3,
+      "duration": 1,
+      "hand": "any"
+    },
+    {
+      "note": "G4",
+      "time": 4,
+      "duration": 1,
+      "hand": "any"
+    },
+    {
+      "note": "A4",
+      "time": 5,
+      "duration": 1,
+      "hand": "any"
+    },
+    {
+      "note": "B4",
+      "time": 6,
+      "duration": 1,
+      "hand": "any"
+    },
+    {
+      "note": "C5",
+      "time": 7,
+      "duration": 2,
+      "hand": "any"
+    }
+  ]
+}
