@@ -1,7 +1,6 @@
-mp ---> tracks 21 points on each hand
+options
 
-To do:
-
-add calibration for hands, when using mobile device,( left hand, right hand)
-add desk calibration
-add camera calibration
+either improve air piano, options --> track the finger to see if it is ahead of other fingers and play only if it is, 2. require two fingers to keep touching to play the specified note, wont play if they are far
+or add a new desk mode, with either top down camera or front facing camera with a view of desk
+plan: a piece of paper kept on the desk most prefably a piano drawing on it, it detects the drawing, fixes the camera so it doesnt move, and then asks the user to list the start and end points, which help the program define the octaves, ( 2 octave template, 3 octave template, 4 octave template), 
+for learning mode of desk option, the person can write numbers starting from 1 that will be the starting point that the user selected and the end number can be say 24 for 2 octaves (including black keys), then for the user to play the keys,  NOTE: need to think what to do in GUI

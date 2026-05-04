@@ -97,7 +97,7 @@ CONTROL_HELP = {
     "metronome": "Starts the metronome automatically when the piano launches.",
     "metronome_bpm": "Sets the metronome tempo in beats per minute.",
     "download_all_samples": "Selects every instrument sample pack for download.",
-    "download_grand": "Downloads or refreshes the Grand Piano sample pack.",
+    "download_grand": "Grand Piano is always required — all other instruments are derived from it.",
     "download_bright": "Downloads or refreshes the Bright Piano sample pack.",
     "download_electronic": "Downloads or refreshes the Electric Piano sample pack.",
     "download_organ": "Downloads or refreshes the Organ sample pack.",
@@ -173,7 +173,7 @@ DEFAULT_SETTINGS = {
     "learning_enabled": False,
     "learning_song": "",
     "learning_autoplay": False,
-    "performance_autoplay": True,
+    "performance_autoplay": False,
     "editor_song": "",
 }
 
@@ -1490,6 +1490,9 @@ class PianoLauncher(ctk.CTk):
                 command=self._on_sample_choice_toggle,
                 tooltip=var_name,
             )
+        # Grand Piano is required — all other instruments are derived from it
+        self.vars["download_grand"].set(True)
+        self.sample_switches["download_grand"].configure(state="disabled")
 
         self.sample_status_label = ctk.CTkLabel(section, text="", text_color=TEXT_MUTED, anchor="w", justify="left")
         self.sample_status_label.grid(row=7, column=0, sticky="ew", padx=16, pady=(6, 0))
@@ -1523,9 +1526,13 @@ class PianoLauncher(ctk.CTk):
         all_selected = bool(self.vars["download_all_samples"].get())
         for var_name, _label, _arg_name in SAMPLE_OPTIONS:
             self.vars[var_name].set(all_selected)
+        # Grand Piano is always required (other instruments are derived from it)
+        self.vars["download_grand"].set(True)
         self._sync_sample_selection_status()
 
     def _on_sample_choice_toggle(self):
+        # Grand Piano is always required (other instruments are derived from it)
+        self.vars["download_grand"].set(True)
         all_selected = all(bool(self.vars[var_name].get()) for var_name, _label, _arg_name in SAMPLE_OPTIONS)
         self.vars["download_all_samples"].set(all_selected)
         self._sync_sample_selection_status()
