@@ -275,7 +275,7 @@ def main():
 
     print(f"\nDone! {generated}/84 piano sounds ready in: {sounds_dir}")
     print("Selected instruments ready: " + ", ".join(INSTRUMENT_LABELS[name] for name in sorted(selected)))
-    print("You can now run the piano! Press 'q' to quit.\n")
+    print("You can now run the piano!\n")
     return 0
 
 
