@@ -1831,7 +1831,7 @@ class PianoLauncher(ctk.CTk):
         self._set_import_controls(True)
         if hasattr(self, "import_status_label"):
             self.import_status_label.configure(text=f"{label} import is running...", text_color=WARNING)
-        self._set_status(f"{label} import is running...", WARNING)
+        self._set_status(f"{label} import is running..., Check terminal for more", WARNING)
 
         def worker():
             try:

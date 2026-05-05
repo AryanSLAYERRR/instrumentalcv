@@ -28,7 +28,7 @@
 
 ### Prerequisites
 
-- **Python 3.10+**
+- **Python 3.11**
 - **Webcam** (built-in laptop camera works fine)
 - **Windows** (primary platform, not tested on mac and linux)
 
@@ -40,9 +40,9 @@ cd instrumentalcv
 ```
 
 ### 2. Create a Virtual Environment
-
+Make sure you have python 3.11 installed
 ```powershell
-python -m venv venv
+py -3.11 -m venv venv
 .\venv\Scripts\Activate.ps1
 ```
 
@@ -98,6 +98,10 @@ These keyboard shortcuts are available during a live piano session:
 
 ## ✨ Features
 
+## 📃 Modes
+- Air Piano
+- Desk Piano (Soon)
+
 ### 🎯 Smart Play Triggers
 
 Three finger detection modes to suit your style, these can be configured in the settings tab of launcher
@@ -144,7 +148,7 @@ Load a song and practice with falling notes that scroll toward the keybed. Suppo
 
 ### 🎵 Multiple Instruments
 
-Switch between **5 built-in sample packs** on the fly — no restart needed:
+Switch between **5 built-in sample packs** on the fly — no restart needed (switch using keys 1-5):
 
 - 🎹 Grand Piano
 - ✨ Bright Piano
@@ -156,14 +160,14 @@ Switch between **5 built-in sample packs** on the fly — no restart needed:
 
 ### 🎶 Song Editor
 
-Create, edit, and save custom songs with the built-in timeline editor. Supports **MIDI** and **MusicXML** import. ( sheet scanner (experimental) )
+Create, edit, and save custom songs with the built-in timeline editor. Supports **MIDI** and **MusicXML** import. (sheet scanner (experimental))
 
 ---
 
 
 ## 📄 License
 
-This project is licensed under the **MIT License** — see [LICENSE](LICENSE) for details.
+This project is licensed under the **MIT License** —> see [LICENSE](LICENSE) for details.
 
 ---
 
