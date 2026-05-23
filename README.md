@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white">
+  <img src="https://img.shields.io/badge/Python-3.11+-3776AB?style=for-the-badge&logo=python&logoColor=white">
   <img src="https://img.shields.io/badge/OpenCV-4.9+-5C3EE8?style=for-the-badge&logo=opencv&logoColor=white">
   <img src="https://img.shields.io/badge/MediaPipe-Hand_Tracking-00897B?style=for-the-badge&logo=google&logoColor=white">
   <img src="https://img.shields.io/badge/Platform-Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white">
@@ -13,24 +13,12 @@
 </p>
 <br>
 
----
-## 📖 Table of Contents
+## Setup
 
-
-- [Setup](#-setup)
-- [Usage](#-usage)
-- [Controls](#-controls)
-- [Features](#-features)
-- [License](#-license)
-
----
-## 🛠 Setup
-
-### Prerequisites
+### Requirements
 
 - **Python 3.11**
-- **Webcam** (built-in laptop camera works fine)
-- **Windows** (primary platform, not tested on mac and linux)
+- **Windows** (has not been tested on mac and linux)
 
 ### 1. Clone the Repository
 
@@ -40,7 +28,7 @@ cd instrumentalcv
 ```
 
 ### 2. Create a Virtual Environment
-Make sure you have python 3.11 installed
+Make sure you have python 3.11 installed (the program uses deprecated mediiapipe solutions api)
 ```powershell
 py -3.11 -m venv venv
 .\venv\Scripts\Activate.ps1
@@ -57,22 +45,18 @@ pip install -r requirements.txt
 ```powershell
 python main.py
 ```
-
-This opens the InstrumentalCV launcher where you can configure all settings and launch the piano.
-
-
 ### 5. Download Sound Samples
 
 On the first launch, go to the **Settings** tab in the launcher and click **Download Samples** to fetch the instrument sound packs
 
-**Note**: Grand piano is required to be downloaded as other instruments are derived from it, only select grand piano to download if you don't want to download other instruments.
+**Note**: Grand piano is required to be downloaded as other instruments are derived from it.
 
 ---
 
-## 🎮 Usage
+## Usage
 
 1. **Launch** — Run `python main.py` to open the launcher dashboard
-2. **Configure** — Set your camera, instrument, keybed position, tracking, learning mode ( each described in [Features](#-features) section )
+2. **Configure** — Set your camera, instrument, keybed position, tracking, learning mode
 3. **Launch Air Piano** — Hit the launch button to start the piano session
 4. **Play** — Hold your hands over the webcam and tap fingers on the virtual keys
 
@@ -96,24 +80,6 @@ These keyboard shortcuts are available during a live piano session:
 
 ---
 
-## ✨ Features
-
-## 📃 Modes
-- Air Piano
-- Desk Piano (Soon)
-
-### 🎯 Smart Play Triggers
-
-Three finger detection modes to suit your style, these can be configured in the settings tab of launcher
-
-| Mode | Description |
-|------|-------------|
-| **Precision Tap** | <ul><li>Detects intentional downward finger taps with motion filtering, most accurate. <ul><li>Detects the downward motion of the finger with respect to the y coordinates of the wrist joint.</li></ul> </li></ul> |
-| **Tap to Play** | <ul><li>Simpler tap detection, good for casual play (use if precision tap is not working well for you). </li></ul> |
-| **Hover to Play** | <ul><li>Play notes just by hovering a finger over a key. <ul><li>Folding the tip of your fingers below pip joints in **Hover to Play** mode will make MP not track that finger, i.e. it only plays when finger is extended (prevents accidental notes).</li></ul> </li></ul> |
-
----
-
 ### 🎼 Learning Mode 
 
 Load a song and practice with falling notes that scroll toward the keybed. Supports autoplay using P key.
@@ -133,42 +99,14 @@ Load a song and practice with falling notes that scroll toward the keybed. Suppo
    - Import .mxl file of the song
    - Import scanned image of the sheet music (experimental)
    - Import PDF of the sheet music (experimental)
-   - `experimental - all notes might not be imported correctly using oemer and takes some time to process`
+   - `experimental - all notes might not be imported correctly using oemer and takes some time and resources to process`
 - After importing your song head to **Learning** tab in the launcher
 - Turn on falling note toggle, and select your imported song in the dropdown menu
    - Other toggles include Autoplay (Can be toggled live with 'P' key)
-   - Autoplayer Performance mode ( does not render the falling notes, only toggle for dense note songs)
+   - Autoplayer Performance mode ( does not render the falling notes, only toggle for dense note songs which may cause lag)
 - Click on the **Launch Learning Mode** button
 - If your song does not fit the octave range you set in the Play tab, it will ask how to handle it
    - Increase the number of visible octaves (max 4 for viable playing)
    - If it still doesn't fit, press **Retune** during launch to remap the song into your chosen range (e.g. a 7-octave song retuned to 4 octaves)
-- The piano will start with falling notes — see [Controls](#-controls) for keyboard shortcuts
-
----
-
-### 🎵 Multiple Instruments
-
-Switch between **5 built-in sample packs** on the fly — no restart needed (switch using keys 1-5):
-
-- 🎹 Grand Piano
-- ✨ Bright Piano
-- ⚡ Electric Piano
-- 🎻 Organ
-- 🌊 Reverb Piano
-
----
-
-### 🎶 Song Editor
-
-Create, edit, and save custom songs with the built-in timeline editor. Supports **MIDI** and **MusicXML** import. (sheet scanner (experimental))
-
----
-
-
-## 📄 License
-
-This project is licensed under the **MIT License** —> see [LICENSE](LICENSE) for details.
-
----
 
 <p align="center"><b>Made by <a href="https://github.com/AryanSLAYERRR">Aryan</a></b></p>
